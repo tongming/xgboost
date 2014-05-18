@@ -376,12 +376,29 @@ namespace xgboost{
                 if (ans < 0) ans = -ans;
                 return static_cast<float>(ans);
             }
+            
+/*	        inline float GetLambdaNDCG_simple(const std::vector<ListEntry> &sorted_list,
+                int index1,
+                int index2, float IDCG){
+		        std::vector<float> labels;
+		        for(size_t i = 0; i < sorted_list.size(); i++){
+		            labels.push_back(sorted_list[i].label);
+		        }
+		
+                double original = CalcDCG(labels);
+		        float temp = labels[index1];
+		        labels[index1] = labels[index2];
+		        labels[index2] = temp;
+		        double changed = CalcDCG(labels);
+	            double ans = (original - changed) / IDCG;
+                if (ans < 0) ans = -ans;
+                return static_cast<float>(ans);
+            }*/
 
             virtual void GetLambdaWeight(const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs){
                 float IDCG = GetIDCG(sorted_list);
-                for (size_t i = 0; i < pairs.size(); i++){
-                    pairs[i].weight = GetLambdaNDCG(sorted_list,
-                        pairs[i].pos_index, pairs[i].neg_index, IDCG);
+		        for (size_t i = 0; i < pairs.size(); i++){
+                    pairs[i].weight = GetLambdaNDCG(sorted_list,pairs[i].pos_index, pairs[i].neg_index, IDCG);
                 }
             }
             
@@ -429,15 +446,16 @@ namespace xgboost{
             inline float GetLambdaMAP(const std::vector<ListEntry> &sorted_list,
                 int index1, int index2,
                 std::vector< Quadruple > &map_acc){
-                if (index1 == index2 
-			|| sorted_list[index1].label == sorted_list[index2].label
+				if (index1 == index2 
 			|| map_acc[map_acc.size() - 1].hits_ == 0
 			) return 0.0;
                 if (index1 > index2) std::swap(index1, index2);
                 float original = map_acc[index2].ap_acc_; // The accumulated precision in the interval [index1,index2]
                 if (index1 != 0) original -= map_acc[index1 - 1].ap_acc_;
-                float changed = 0;
-                if (sorted_list[index1].label < sorted_list[index2].label){
+                float changed = 0, label1 = sorted_list[index1].label > 0?1:0,label2 = sorted_list[index2].label > 0?1:0;
+                if(label1 == label2){
+					return 0.0;
+				}else if (label1 < label2){
                     changed += map_acc[index2 - 1].ap_acc_add_ - map_acc[index1].ap_acc_add_;
                     changed += (map_acc[index1].hits_ + 1.0f) / (index1 + 1);
                 }
@@ -445,10 +463,9 @@ namespace xgboost{
                     changed += map_acc[index2 - 1].ap_acc_miss_ - map_acc[index1].ap_acc_miss_;
                     changed += map_acc[index2].hits_ / (index2 + 1);
                 }
-                if(map_acc[map_acc.size() - 1].hits_ == 0) printf("haha\n");
-
+				
                 float ans = (changed - original) / (map_acc[map_acc.size() - 1].hits_);
-                if (ans < 0) ans = -ans;
+				if (ans < 0) ans = -ans;
                 return ans;
             }
 
@@ -470,19 +487,51 @@ namespace xgboost{
                         acc2 += (hit - 1) / i;
                         acc3 += (hit + 1) / i;
                     }
-                    map_acc[i - 1].ap_acc_ = acc1;
-                    map_acc[i - 1].ap_acc_miss_ = acc2;
-                    map_acc[i - 1].ap_acc_add_ = acc3;
-                    map_acc[i - 1].hits_ = hit;
-               
+					
+					map_acc[i - 1] = Quadruple(acc1,acc2,acc3,hit);
                 }
             }
+			
+/*			inline float CalcAP( const std::vector<float> &rec ) {
+                unsigned nhits = 0;
+                double sumap = 0.0;
+                for( size_t i = 0; i < rec.size(); ++i){
+                    if( rec[i] != 0 ){
+                        nhits += 1;
+                        sumap += static_cast<float>(nhits) / (i+1);
+                    }
+                }
+                if (nhits != 0) sumap /= nhits;
+                return static_cast<float>(sumap);    
+			}
+			
+			inline float GetLambdaMAP_simple(const std::vector<ListEntry> &sorted_list,
+                int index1, int index2,
+                std::vector< Quadruple > &map_acc){
+			    std::vector<float> labels;
+				float hits = 0;
+		        for(size_t i = 0; i < sorted_list.size(); i++){
+		            labels.push_back(sorted_list[i].label);
+					if(sorted_list[i].label > 0) hits++;
+		        }
+				if(hits == 0) return 0;
+                double original = CalcAP(labels);
+		        float temp = labels[index1];
+		        labels[index1] = labels[index2];
+		        labels[index2] = temp;
+		        double changed = CalcAP(labels);
+	            double ans = original - changed;
+			     
+                if (ans < 0) ans = -ans;
+                return static_cast<float>(ans);
+			}*/
+			
             virtual void GetLambdaWeight(const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs){
                 std::vector< Quadruple > map_acc;
-                GetMAPAcc(sorted_list, map_acc);
+				GetMAPAcc(sorted_list, map_acc);
                 for (size_t i = 0; i < pairs.size(); i++){
                     pairs[i].weight = GetLambdaMAP(sorted_list, pairs[i].pos_index, pairs[i].neg_index, map_acc);
-                }
+				}
             }
            
         };
