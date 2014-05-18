@@ -330,8 +330,7 @@ namespace xgboost{
             virtual ~PairwiseRankObj(void){}
             virtual void GetLambdaWeight( const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs ){}            
         };
-
-
+		
         class LambdaRankObj_NDCG : public LambdaRankObj{
             
         public:
