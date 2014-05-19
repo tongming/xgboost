@@ -298,7 +298,7 @@ namespace xgboost{
                 for( size_t i = 0; i < rec.size() && i < this->topn_; i ++ ){
                     const unsigned rel = rec[i].second;
                     if( rel != 0 ){ 
-                        sumdcg += logf(2.0f) * ((1<<rel)-1) / logf( i + 2 );
+                        sumdcg += ((1<<rel)-1) / logf( i + 2 );
                     }
                 }
                 return static_cast<float>(sumdcg);

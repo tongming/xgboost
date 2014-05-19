@@ -331,76 +331,50 @@ namespace xgboost{
             virtual void GetLambdaWeight( const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs ){}            
         };
 		
-        class LambdaRankObj_NDCG : public LambdaRankObj{
-            
+        class LambdaRankObj_NDCG : public LambdaRankObj{            
         public:
             virtual ~LambdaRankObj_NDCG(void){}
+            virtual void GetLambdaWeight(const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs){
+                float IDCG;
+                {
+                    std::vector<float> labels(sorted_list.size());
+                    for (size_t i = 0; i < sorted_list.size(); i++){
+                        labels[i] = sorted_list[i].label;
+                    }
+                    std::sort(labels.begin(), labels.end(), std::greater<float>());
+                    IDCG = CalcDCG(labels);
+                }
 
-            inline float CalcDCG( const std::vector<float> &labels ){
+                if( IDCG == 0.0 ){
+                    for (size_t i = 0; i < pairs.size(); ++i){
+                        pairs[i].weight = 0.0f;
+                    }
+                }else{
+                    IDCG = 1.0f / IDCG;
+                    for (size_t i = 0; i < pairs.size(); ++i){                    
+                        unsigned pos_idx = pairs[i].pos_index;
+                        unsigned neg_idx = pairs[i].neg_index;
+                        int pos_label = static_cast<int>(sorted_list[pos_idx].label);
+                        int neg_label = static_cast<int>(sorted_list[neg_idx].label);
+                        float original = ((1<<pos_label)-1) / logf(pos_idx+2) + ((1<<neg_label)-1) / logf(neg_idx+2 );
+                        float changed  = ((1<<neg_label)-1) / logf(pos_idx+2) + ((1<<pos_label)-1) / logf(neg_idx+2 );
+                        float delta = (original-changed) * IDCG;
+                        if( delta < 0.0f ) delta = - delta;
+                        pairs[i].weight = delta;
+                    }
+                }
+            }
+        private:
+            inline static float CalcDCG( const std::vector<float> &labels ){
                 double sumdcg = 0.0;
                 for( size_t i = 0; i < labels.size(); i ++ ){
                     const unsigned rel = labels[i];
                     if( rel != 0 ){ 
-                        sumdcg += logf(2.0f) * ((1<<rel)-1) / logf( i + 2 );
+                        sumdcg += ((1<<rel)-1) / logf( i + 2 );
                     }
                 }
                 return static_cast<float>(sumdcg);
             }
-
-            inline float GetIDCG(const std::vector<ListEntry> &sorted_list){
-                std::vector<float> labels;
-                for (size_t i = 0; i < sorted_list.size(); i++){
-                    labels.push_back(sorted_list[i].label);
-                }
-
-                std::sort(labels.begin(), labels.end(), std::greater<float>());
-                return CalcDCG(labels);
-            }
-
-            /*
-            * \brief Obtain the delta NDCG if trying to switch the positions of instances in index1 or index2
-            *        in sorted triples. Here DCG is calculated as sigma_i 2^rel_i/log(i + 1)
-            * \param sorted_list the list containing entry information
-            * \param index1,index2 the instances switched
-            * \param the IDCG of the list
-            */
-            inline float GetLambdaNDCG(const std::vector<ListEntry> &sorted_list,
-                int index1,
-                int index2, float IDCG){
-                double original = (1 << static_cast<int>(sorted_list[index1].label)) / log(index1 + 2)
-                    + (1 << static_cast<int>(sorted_list[index2].label)) / log(index2 + 2);
-                double changed = (1 << static_cast<int>(sorted_list[index2].label)) / log(index1 + 2)
-                    + (1 << static_cast<int>(sorted_list[index1].label)) / log(index2 + 2);
-                double ans = (original - changed) / IDCG;
-                if (ans < 0) ans = -ans;
-                return static_cast<float>(ans);
-            }
-            
-/*	        inline float GetLambdaNDCG_simple(const std::vector<ListEntry> &sorted_list,
-                int index1,
-                int index2, float IDCG){
-		        std::vector<float> labels;
-		        for(size_t i = 0; i < sorted_list.size(); i++){
-		            labels.push_back(sorted_list[i].label);
-		        }
-		
-                double original = CalcDCG(labels);
-		        float temp = labels[index1];
-		        labels[index1] = labels[index2];
-		        labels[index2] = temp;
-		        double changed = CalcDCG(labels);
-	            double ans = (original - changed) / IDCG;
-                if (ans < 0) ans = -ans;
-                return static_cast<float>(ans);
-            }*/
-
-            virtual void GetLambdaWeight(const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs){
-                float IDCG = GetIDCG(sorted_list);
-		        for (size_t i = 0; i < pairs.size(); i++){
-                    pairs[i].weight = GetLambdaNDCG(sorted_list,pairs[i].pos_index, pairs[i].neg_index, IDCG);
-                }
-            }
-            
         };
 
         class LambdaRankObj_MAP : public LambdaRankObj{
