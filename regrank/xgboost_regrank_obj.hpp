@@ -356,8 +356,8 @@ namespace xgboost{
                         unsigned neg_idx = pairs[i].neg_index;
                         int pos_label = static_cast<int>(sorted_list[pos_idx].label);
                         int neg_label = static_cast<int>(sorted_list[neg_idx].label);
-                        float original = ((1<<pos_label)-1) / logf(pos_idx+2) + ((1<<neg_label)-1) / logf(neg_idx+2 );
-                        float changed  = ((1<<neg_label)-1) / logf(pos_idx+2) + ((1<<pos_label)-1) / logf(neg_idx+2 );
+                        float original = ((1<<pos_label)-1) / logf(pos_idx+2) + ((1<<neg_label)-1) / logf(neg_idx+2);
+                        float changed  = ((1<<neg_label)-1) / logf(pos_idx+2) + ((1<<pos_label)-1) / logf(neg_idx+2);
                         float delta = (original-changed) * IDCG;
                         if( delta < 0.0f ) delta = - delta;
                         pairs[i].weight = delta;
