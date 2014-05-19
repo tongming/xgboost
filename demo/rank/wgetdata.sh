@@ -1,4 +1,4 @@
 #!/bin/bash
-wget http://research.microsoft.com/en-us/um/beijing/projects/letor/LETOR4.0/Data/MQ2008.rar
-unrar x MQ2008.rar
-mv -f MQ2008/Fold1/*.txt .
+wget http://research.microsoft.com/en-us/um/beijing/projects/mslr/data/MSLR-WEB30K.zip
+unzip MSLR-WEB30K.zip -d ./MSLR
+mv -f ./MSLR/Fold1/*.txt .
