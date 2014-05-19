@@ -330,7 +330,7 @@ namespace xgboost{
             virtual ~PairwiseRankObj(void){}
             virtual void GetLambdaWeight( const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs ){}            
         };
-		
+
         class LambdaRankObj_NDCG : public LambdaRankObj{            
         public:
             virtual ~LambdaRankObj_NDCG(void){}
@@ -381,28 +381,21 @@ namespace xgboost{
 
         class LambdaRankObj_MAP : public LambdaRankObj{
 
-            class Quadruple{
-            public:
+            struct MAPStats{
+            
                 /* \brief the accumulated precision */
-                float ap_acc_;
+                float ap_acc;
                 /* \brief the accumulated precision assuming a positive instance is missing*/
-                float ap_acc_miss_;
+                float ap_acc_miss;
                 /* \brief the accumulated precision assuming that one more positive instance is inserted ahead*/
-                float ap_acc_add_;
+                float ap_acc_add;
                 /* \brief the accumulated positive instance count */
-                float hits_;
-
-                Quadruple(){}
-
-                Quadruple(const Quadruple& q){
-                    ap_acc_ = q.ap_acc_;
-                    ap_acc_miss_ = q.ap_acc_miss_;
-                    ap_acc_add_ = q.ap_acc_add_;
-                    hits_ = q.hits_;
-                }
-
-                Quadruple(float ap_acc, float ap_acc_miss, float ap_acc_add, float hits
-                    ) :ap_acc_(ap_acc), ap_acc_miss_(ap_acc_miss), ap_acc_add_(ap_acc_add), hits_(hits){
+                float hits;
+                
+                MAPStats(){}
+                
+                MAPStats(float ap_acc, float ap_acc_miss, float ap_acc_add, float hits
+                    ) :ap_acc(ap_acc), ap_acc_miss(ap_acc_miss), ap_acc_add(ap_acc_add), hits(hits){
 
                 }
 
@@ -416,43 +409,41 @@ namespace xgboost{
             *        in sorted triples
             * \param sorted_list the list containing entry information
             * \param index1,index2 the instances switched
-            * \param map_acc a vector containing the accumulated precisions for each position in a list
+            * \param map_stats a vector containing the accumulated precisions for each position in a list
             */
             inline float GetLambdaMAP(const std::vector<ListEntry> &sorted_list,
                 int index1, int index2,
-                std::vector< Quadruple > &map_acc){
-				if (index1 == index2 
-			|| map_acc[map_acc.size() - 1].hits_ == 0
-			) return 0.0;
+                std::vector< MAPStats > &map_stats){
+                if (index1 == index2 || map_stats[map_stats.size() - 1].hits == 0) {
+                    return 0.0;
+                }
                 if (index1 > index2) std::swap(index1, index2);
-                float original = map_acc[index2].ap_acc_; // The accumulated precision in the interval [index1,index2]
-                if (index1 != 0) original -= map_acc[index1 - 1].ap_acc_;
+                float original = map_stats[index2].ap_acc;
+                if (index1 != 0) original -= map_stats[index1 - 1].ap_acc;
                 float changed = 0, label1 = sorted_list[index1].label > 0?1:0,label2 = sorted_list[index2].label > 0?1:0;
                 if(label1 == label2){
-					return 0.0;
-				}else if (label1 < label2){
-                    changed += map_acc[index2 - 1].ap_acc_add_ - map_acc[index1].ap_acc_add_;
-                    changed += (map_acc[index1].hits_ + 1.0f) / (index1 + 1);
+                    return 0.0;
+                }else if (label1 < label2){
+                    changed += map_stats[index2 - 1].ap_acc_add - map_stats[index1].ap_acc_add;
+                    changed += (map_stats[index1].hits + 1.0f) / (index1 + 1);
                 }
                 else{
-                    changed += map_acc[index2 - 1].ap_acc_miss_ - map_acc[index1].ap_acc_miss_;
-                    changed += map_acc[index2].hits_ / (index2 + 1);
+                    changed += map_stats[index2 - 1].ap_acc_miss - map_stats[index1].ap_acc_miss;
+                    changed += map_stats[index2].hits / (index2 + 1);
                 }
-				
-                float ans = (changed - original) / (map_acc[map_acc.size() - 1].hits_);
-				if (ans < 0) ans = -ans;
+
+                float ans = (changed - original) / (map_stats[map_stats.size() - 1].hits);
+                if (ans < 0) ans = -ans;
                 return ans;
             }
 
             /*
-            * \brief preprocessing results for calculating delta MAP
-            * \return The first field is the accumulated precision, the second field is the
-            *         accumulated precision assuming a positive instance is missing,
-            *         the third field is the accumulated precision assuming that one more positive
-            *         instance is inserted, the fourth field is the accumulated positive instance count
+            * \brief obtain preprocessing results for calculating delta MAP
+            * \param sorted_list the list containing entry information
+            * \param map_stats a vector containing the accumulated precisions for each position in a list
             */
-            inline void GetMAPAcc(const std::vector<ListEntry> &sorted_list,
-                std::vector< Quadruple > &map_acc){
+            inline void GetMAPStats(const std::vector<ListEntry> &sorted_list,
+                std::vector< MAPStats > &map_acc){
                 map_acc.resize(sorted_list.size());
                 float hit = 0, acc1 = 0, acc2 = 0, acc3 = 0;
                 for (size_t i = 1; i <= sorted_list.size(); i++){
@@ -462,51 +453,17 @@ namespace xgboost{
                         acc2 += (hit - 1) / i;
                         acc3 += (hit + 1) / i;
                     }
-					
-					map_acc[i - 1] = Quadruple(acc1,acc2,acc3,hit);
+
+                    map_acc[i - 1] = MAPStats(acc1,acc2,acc3,hit);
                 }
             }
-			
-/*			inline float CalcAP( const std::vector<float> &rec ) {
-                unsigned nhits = 0;
-                double sumap = 0.0;
-                for( size_t i = 0; i < rec.size(); ++i){
-                    if( rec[i] != 0 ){
-                        nhits += 1;
-                        sumap += static_cast<float>(nhits) / (i+1);
-                    }
-                }
-                if (nhits != 0) sumap /= nhits;
-                return static_cast<float>(sumap);    
-			}
-			
-			inline float GetLambdaMAP_simple(const std::vector<ListEntry> &sorted_list,
-                int index1, int index2,
-                std::vector< Quadruple > &map_acc){
-			    std::vector<float> labels;
-				float hits = 0;
-		        for(size_t i = 0; i < sorted_list.size(); i++){
-		            labels.push_back(sorted_list[i].label);
-					if(sorted_list[i].label > 0) hits++;
-		        }
-				if(hits == 0) return 0;
-                double original = CalcAP(labels);
-		        float temp = labels[index1];
-		        labels[index1] = labels[index2];
-		        labels[index2] = temp;
-		        double changed = CalcAP(labels);
-	            double ans = original - changed;
-			     
-                if (ans < 0) ans = -ans;
-                return static_cast<float>(ans);
-			}*/
-			
+
             virtual void GetLambdaWeight(const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs){
-                std::vector< Quadruple > map_acc;
-				GetMAPAcc(sorted_list, map_acc);
+                std::vector< MAPStats > map_stats;
+                GetMAPStats(sorted_list, map_stats);
                 for (size_t i = 0; i < pairs.size(); i++){
-                    pairs[i].weight = GetLambdaMAP(sorted_list, pairs[i].pos_index, pairs[i].neg_index, map_acc);
-				}
+                    pairs[i].weight = GetLambdaMAP(sorted_list, pairs[i].pos_index, pairs[i].neg_index, map_stats);
+                }
             }
            
         };
