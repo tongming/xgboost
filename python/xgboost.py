@@ -186,7 +186,7 @@ class Booster:
 
 def train(params, dtrain, num_boost_round = 10, evals = [], obj=None):
     """ train a booster with given paramaters """
-    bst = Booster(params, [dtrain] )
+    bst = Booster(params, [dtrain]+[ d[0] for d in evals ] )
     if obj == None:
         for i in range(num_boost_round):
             bst.update( dtrain )
