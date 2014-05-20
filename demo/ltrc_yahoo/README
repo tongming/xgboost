@@ -1,0 +1,13 @@
+Instructions:
+The dataset for this ranking demo is from yahoo learning to rank challenge,
+http://webscope.sandbox.yahoo.com/catalog.php?datatype=c ,
+You can first download the C14 - Yahoo! Learning to Rank Challenge dataset, 
+and put the ltrc_yahoo.tar.bz2 file in the directory,
+then use the following command to run the example
+./runexp.sh
+
+
+
+
+
+
