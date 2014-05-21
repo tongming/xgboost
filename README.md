@@ -2,10 +2,7 @@ xgboost: eXtreme Gradient Boosting
 =======
 An optimized general purpose gradient boosting (tree) library.
 
-Contributors:
-* Tianqi Chen, project creater
-* Kailong Chen, contributes regression module
-* Bing Xu, contributes python interface, higgs example
+Contributors: https://github.com/tqchen/xgboost/graphs/contributors
 
 Turorial and Documentation: https://github.com/tqchen/xgboost/wiki
  
@@ -36,6 +33,12 @@ Planned components
     - ranking
     - matrix factorization
     - structured prediction
+
+Build
+======
+* Simply type make
+* If your compiler does not come with OpenMP support, it will fire an warning telling you that the code will compile into single thread mode, and you will get single thread xgboost
+  - You may get a error: -lgomp is not found, you can remove -fopenmp flag in Makefile to get single thread xgboost, or upgrade your compiler to compile multi-thread version
 
 File extension convention
 =======
