@@ -163,6 +163,7 @@ namespace xgboost{
                 {// optimize bias
                     double sum_grad = 0.0, sum_hess = 0.0;
                     for( size_t i = 0; i < grad.size(); i ++ ){
+                        if( hess[i] < 0.0f ) continue;
                         sum_grad += grad[ i ]; sum_hess += hess[ i ];
                     }
                     // remove bias effect
@@ -181,8 +182,10 @@ namespace xgboost{
                     double sum_grad = 0.0, sum_hess = 0.0;
                     for( typename FMatrix::ColIter it = smat.GetSortedCol(i); it.Next(); ){
                         const float v = it.fvalue();
-                        sum_grad += grad[ it.rindex() ] * v;
-                        sum_hess += hess[ it.rindex() ] * v * v;
+                        const bst_uint ridx = it.rindex();
+                        if( hess[ridx] < 0.0f ) continue;
+                        sum_grad += grad[ ridx ] * v;
+                        sum_hess += hess[ ridx ] * v * v;
                     }
                     float w = model.weight[ i ];
                     double dw = param.learning_rate * param.CalcDelta( sum_grad, sum_hess, w );
