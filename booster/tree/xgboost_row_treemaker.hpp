@@ -271,7 +271,8 @@ namespace xgboost{
                         }
                     }
                     // --- end of building column major matrix ---                    
-                    // after this point, tmp_rptr and entry is ready to use                    
+                    // after this point, tmp_rptr and entry is ready to use
+                    // created subsampled columns to use 
                     int naclist = (int)aclist.size();
                     // best entry for each thread
                     SplitEntry nbest, tbest;
@@ -355,6 +356,17 @@ namespace xgboost{
                         qexpand.push_back( i );
                     }
                 }
+                
+                {// intialize subcolumn sampling mask
+                    col_keep.resize( this->tree.param.num_feature, false );
+                    for( size_t i = 0; i < col_keep.size(); ++ i ){
+                        if( param.colsample_bytree == 1.0f ||
+                            random::SampleBinary( param.colsample_bytree ) != 0 ){
+                            col_keep[i] = true;
+                        }
+                    } 
+                    utils::Assert( param.colsample_bylevel == 1.0f, "Rowbase tree maker does not support column sample by level now" );
+                }
             }
 
             // initialize temp data structure
@@ -373,7 +385,9 @@ namespace xgboost{
             // Instance row indexes corresponding to each node
             std::vector<bst_uint> row_index_set;
             // lower and upper bound of each nodes' row_index
-            std::vector< std::pair<bst_uint, bst_uint> > node_bound;
+            std::vector< std::pair<bst_uint, bst_uint> > node_bound;            
+            // whether something is subsampled during each round
+            std::vector<bool> col_keep;
         private:
             const std::vector<float> &grad;
             const std::vector<float> &hess;

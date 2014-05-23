@@ -411,6 +411,10 @@ namespace xgboost{
             float subsample;
             // whether to use layerwise aware regularization
             int   use_layerwise;
+            // whether to subsample columns each split, in each level
+            float colsample_bylevel;
+            // whether to subsample columns during tree construction
+            float colsample_bytree;
             // number of threads to be used for tree construction, if OpenMP is enabled, if equals 0, use system default
             int nthread;
             /*! \brief constructor */
@@ -422,6 +426,8 @@ namespace xgboost{
                 reg_method = 2;
                 default_direction = 0;
                 subsample = 1.0f;
+                colsample_bytree = 1.0f;
+                colsample_bylevel = 1.0f;
                 use_layerwise = 0;
                 nthread = 0;
             }
@@ -443,6 +449,8 @@ namespace xgboost{
                 if( !strcmp( name, "reg_lambda") )        reg_lambda = (float)atof( val );
                 if( !strcmp( name, "reg_method") )        reg_method = (float)atof( val );
                 if( !strcmp( name, "subsample") )         subsample  = (float)atof( val );
+                if( !strcmp( name, "colsample_bylevel") ) colsample_bylevel  = (float)atof( val );
+                if( !strcmp( name, "colsample_bytree") )  colsample_bytree  = (float)atof( val );
                 if( !strcmp( name, "use_layerwise") )     use_layerwise = atoi( val );
                 if( !strcmp( name, "nthread") )           nthread = atoi( val );
                 if( !strcmp( name, "default_direction") ) {

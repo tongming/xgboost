@@ -176,20 +176,27 @@ namespace xgboost{
 
             // find splits at current level
             inline void FindSplit( int depth ){
-                const unsigned nsize = static_cast<unsigned>( feat_index.size() );
-                
-                #pragma omp parallel for schedule( dynamic, 1 )
-                for( unsigned i = 0; i < nsize; ++ i ){
-                    const unsigned fid = feat_index[i];
-                    const int tid = omp_get_thread_num();
-                    if( param.need_forward_search() ){
-                        this->EnumerateSplit( smat.GetSortedCol(fid), fid, stemp[tid], true );
+                {// created from feat set
+                    std::vector<unsigned> feat_set; feat_set.reserve( feat_index.size() );
+                    for( size_t i = 0; i < feat_index.size(); ++i ){
+                        if( param.colsample_bylevel == 1.0f || random::SampleBinary( param.colsample_bylevel ) != 0 ){
+                            feat_set.push_back( feat_index[i] );
+                        }
                     }
-                    if( param.need_backward_search() ){
-                        this->EnumerateSplit( smat.GetReverseSortedCol(fid), fid, stemp[tid], false );
+                    const unsigned nsize = static_cast<unsigned>( feat_set.size() );
+                    #pragma omp parallel for schedule( dynamic, 1 )
+                    for( unsigned i = 0; i < nsize; ++ i ){
+                        const unsigned fid = feat_set[i];
+                        const int tid = omp_get_thread_num();
+                        if( param.need_forward_search() ){
+                            this->EnumerateSplit( smat.GetSortedCol(fid), fid, stemp[tid], true );
+                        }
+                        if( param.need_backward_search() ){
+                            this->EnumerateSplit( smat.GetReverseSortedCol(fid), fid, stemp[tid], false );
+                        }
                     }
                 }
-
+                    
                 // after this each thread's stemp will get the best candidates, aggregate results
                 for( size_t i = 0; i < qexpand.size(); ++ i ){
                     const int nid = qexpand[ i ];
@@ -285,7 +292,10 @@ namespace xgboost{
                     int ncol = static_cast<int>( smat.NumCol() );
                     for( int i = 0; i < ncol; i ++ ){
                         if( smat.GetSortedCol(i).Next() && constrain.NotBanned(i) ){
-                            feat_index.push_back( i );
+                            if( param.colsample_bytree == 1.0f || 
+                                random::SampleBinary( param.colsample_bytree ) != 0 ){
+                                feat_index.push_back( i );
+                            }
                         }
                     }
                     random::Shuffle( feat_index );
