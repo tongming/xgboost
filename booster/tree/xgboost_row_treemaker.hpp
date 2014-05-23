@@ -257,7 +257,7 @@ namespace xgboost{
                         const bst_uint ridx = row_index_set[i];
                         for( typename FMatrix::RowIter it = smat.GetRow(ridx,gid); it.Next(); ){
                             const bst_uint findex = it.findex();
-                            if( constrain.NotBanned( findex ) ) builder.AddBudget( findex );
+                            if( constrain.NotBanned( findex ) && col_keep[findex] ) builder.AddBudget( findex );
                         }
                     }
                     builder.InitStorage();
@@ -265,14 +265,13 @@ namespace xgboost{
                         const bst_uint ridx = row_index_set[i];
                         for( typename FMatrix::RowIter it = smat.GetRow(ridx,gid); it.Next(); ){
                             const bst_uint findex = it.findex();
-                            if( constrain.NotBanned( findex ) ) {
+                            if( constrain.NotBanned( findex ) && col_keep[findex] ) {
                                 builder.PushElem( findex, FMatrixS::REntry( ridx, it.fvalue() ) );
                             }
                         }
                     }
                     // --- end of building column major matrix ---                    
                     // after this point, tmp_rptr and entry is ready to use
-                    // created subsampled columns to use 
                     int naclist = (int)aclist.size();
                     // best entry for each thread
                     SplitEntry nbest, tbest;
@@ -358,12 +357,16 @@ namespace xgboost{
                 }
                 
                 {// intialize subcolumn sampling mask
-                    col_keep.resize( this->tree.param.num_feature, false );
-                    for( size_t i = 0; i < col_keep.size(); ++ i ){
-                        if( param.colsample_bytree == 1.0f ||
-                            random::SampleBinary( param.colsample_bytree ) != 0 ){
-                            col_keep[i] = true;
-                        }
+                    std::vector<unsigned> findex( this->tree.param.num_feature );
+                    for( size_t i = 0; i < findex.size(); ++ i ){
+                        findex[i] = static_cast<unsigned>(i);
+                    }
+                    random::Shuffle( findex );
+                    unsigned n = static_cast<unsigned>( param.colsample_bytree * findex.size() );
+                    utils::Assert( n > 0, "colsample_bytree is too small that no feature is included");
+                    col_keep.resize( findex.size(), false );
+                    for( unsigned i = 0; i < n; ++ i ){
+                        col_keep[findex[i]] = true;
                     } 
                     utils::Assert( param.colsample_bylevel == 1.0f, "Rowbase tree maker does not support column sample by level now" );
                 }

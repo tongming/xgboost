@@ -177,11 +177,12 @@ namespace xgboost{
             // find splits at current level
             inline void FindSplit( int depth ){
                 {// created from feat set
-                    std::vector<unsigned> feat_set; feat_set.reserve( feat_index.size() );
-                    for( size_t i = 0; i < feat_index.size(); ++i ){
-                        if( param.colsample_bylevel == 1.0f || random::SampleBinary( param.colsample_bylevel ) != 0 ){
-                            feat_set.push_back( feat_index[i] );
-                        }
+                    std::vector<unsigned> feat_set = feat_index;
+                    if( param.colsample_bylevel == 1.0f ){
+                        random::Shuffle( feat_set );
+                        unsigned n = static_cast<unsigned>( param.colsample_bylevel * feat_index.size() );
+                        utils::Assert( n > 0, "colsample_bylevel is too small that no feature can be included" );
+                        feat_set.resize( n );
                     }
                     const unsigned nsize = static_cast<unsigned>( feat_set.size() );
                     #pragma omp parallel for schedule( dynamic, 1 )
@@ -289,16 +290,16 @@ namespace xgboost{
                 }
                 
                 {// initialize feature index
-                    int ncol = static_cast<int>( smat.NumCol() );
-                    for( int i = 0; i < ncol; i ++ ){
+                    unsigned ncol = static_cast<unsigned>( smat.NumCol() );
+                    for( unsigned i = 0; i < ncol; ++i ){
                         if( smat.GetSortedCol(i).Next() && constrain.NotBanned(i) ){
-                            if( param.colsample_bytree == 1.0f || 
-                                random::SampleBinary( param.colsample_bytree ) != 0 ){
-                                feat_index.push_back( i );
-                            }
+                            feat_index.push_back( i );
                         }
-                    }
+                    }                    
+                    unsigned n = static_cast<unsigned>( param.colsample_bytree * feat_index.size() );
                     random::Shuffle( feat_index );
+                    utils::Assert( n > 0, "colsample_bytree is too small that no feature can be included" );
+                    feat_index.resize( n );
                 }
                 {// setup temp space for each thread
                     if( param.nthread != 0 ){
@@ -328,7 +329,7 @@ namespace xgboost{
             // number of omp thread used during training
             int nthread;
             // Per feature: shuffle index of each feature index
-            std::vector<int> feat_index;
+            std::vector<unsigned> feat_index;
             // Instance Data: current node position in the tree of each instance
             std::vector<int> position;
             // PerThread x PerTreeNode: statistics for per thread construction
