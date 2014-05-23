@@ -178,7 +178,7 @@ namespace xgboost{
             inline void FindSplit( int depth ){
                 {// created from feat set
                     std::vector<unsigned> feat_set = feat_index;
-                    if( param.colsample_bylevel == 1.0f ){
+                    if( param.colsample_bylevel != 1.0f ){
                         random::Shuffle( feat_set );
                         unsigned n = static_cast<unsigned>( param.colsample_bylevel * feat_index.size() );
                         utils::Assert( n > 0, "colsample_bylevel is too small that no feature can be included" );
