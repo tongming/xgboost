@@ -176,20 +176,28 @@ namespace xgboost{
 
             // find splits at current level
             inline void FindSplit( int depth ){
-                const unsigned nsize = static_cast<unsigned>( feat_index.size() );
-                
-                #pragma omp parallel for schedule( dynamic, 1 )
-                for( unsigned i = 0; i < nsize; ++ i ){
-                    const unsigned fid = feat_index[i];
-                    const int tid = omp_get_thread_num();
-                    if( param.need_forward_search() ){
-                        this->EnumerateSplit( smat.GetSortedCol(fid), fid, stemp[tid], true );
+                {// created from feat set
+                    std::vector<unsigned> feat_set = feat_index;
+                    if( param.colsample_bylevel != 1.0f ){
+                        random::Shuffle( feat_set );
+                        unsigned n = static_cast<unsigned>( param.colsample_bylevel * feat_index.size() );
+                        utils::Assert( n > 0, "colsample_bylevel is too small that no feature can be included" );
+                        feat_set.resize( n );
                     }
-                    if( param.need_backward_search() ){
-                        this->EnumerateSplit( smat.GetReverseSortedCol(fid), fid, stemp[tid], false );
+                    const unsigned nsize = static_cast<unsigned>( feat_set.size() );
+                    #pragma omp parallel for schedule( dynamic, 1 )
+                    for( unsigned i = 0; i < nsize; ++ i ){
+                        const unsigned fid = feat_set[i];
+                        const int tid = omp_get_thread_num();
+                        if( param.need_forward_search() ){
+                            this->EnumerateSplit( smat.GetSortedCol(fid), fid, stemp[tid], true );
+                        }
+                        if( param.need_backward_search() ){
+                            this->EnumerateSplit( smat.GetReverseSortedCol(fid), fid, stemp[tid], false );
+                        }
                     }
                 }
-
+                    
                 // after this each thread's stemp will get the best candidates, aggregate results
                 for( size_t i = 0; i < qexpand.size(); ++ i ){
                     const int nid = qexpand[ i ];
@@ -282,13 +290,16 @@ namespace xgboost{
                 }
                 
                 {// initialize feature index
-                    int ncol = static_cast<int>( smat.NumCol() );
-                    for( int i = 0; i < ncol; i ++ ){
+                    unsigned ncol = static_cast<unsigned>( smat.NumCol() );
+                    for( unsigned i = 0; i < ncol; ++i ){
                         if( smat.GetSortedCol(i).Next() && constrain.NotBanned(i) ){
                             feat_index.push_back( i );
                         }
-                    }
+                    }                    
+                    unsigned n = static_cast<unsigned>( param.colsample_bytree * feat_index.size() );
                     random::Shuffle( feat_index );
+                    utils::Assert( n > 0, "colsample_bytree is too small that no feature can be included" );
+                    feat_index.resize( n );
                 }
                 {// setup temp space for each thread
                     if( param.nthread != 0 ){
@@ -318,7 +329,7 @@ namespace xgboost{
             // number of omp thread used during training
             int nthread;
             // Per feature: shuffle index of each feature index
-            std::vector<int> feat_index;
+            std::vector<unsigned> feat_index;
             // Instance Data: current node position in the tree of each instance
             std::vector<int> position;
             // PerThread x PerTreeNode: statistics for per thread construction
