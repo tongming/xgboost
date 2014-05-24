@@ -261,12 +261,14 @@ namespace xgboost{
             EvalRankList(const char *name){
                 name_ = name;
                 minus_ = false;
-                if( sscanf(name, "%*[^@]@%u", &topn_) != 1 ){
+                if( sscanf(name, "%*[^@]@%u[-]?", &topn_) != 1 ){
                     topn_ = UINT_MAX;
                 }
-                if( name_.find("-") == 0){
+                
+                if(name[strlen(name)-1]=='-'){
                     minus_ = true;
                 }
+                
             }
             /*! \return evaluation metric, given the pair_sort record, (pred,label) */
             virtual float EvalMetric( std::vector< std::pair<float, unsigned> > &pair_sort ) const = 0;
@@ -370,8 +372,8 @@ namespace xgboost{
                 if (!strcmp(name, "auc"))    evals_.push_back(new EvalAuc());
                 if (!strncmp(name, "ams@",4))  evals_.push_back(new EvalAMS(name));
                 if (!strncmp(name, "pre@", 4)) evals_.push_back(new EvalPrecision(name));
-                if (!strncmp(name, "map", 3) || !strncmp(name, "-map", 4))   evals_.push_back(new EvalMAP(name));
-                if (!strncmp(name, "ndcg", 3) || !strncmp(name, "-ndcg", 4))  evals_.push_back(new EvalNDCG(name));
+                if (!strncmp(name, "map", 3))   evals_.push_back(new EvalMAP(name));
+                if (!strncmp(name, "ndcg", 3))  evals_.push_back(new EvalNDCG(name));
             }
             ~EvalSet(){
                 for (size_t i = 0; i < evals_.size(); ++i){
