@@ -8,6 +8,6 @@ python trans_data.py set1.valid.txt vali vali.group
 
 ../../xgboost ltrc_yahoo.conf
 
-../../xgboost ltrc_yahoo.conf task=pred model_in=0100.model
+../../xgboost ltrc_yahoo.conf task=pred model_in=0004.model
 
 

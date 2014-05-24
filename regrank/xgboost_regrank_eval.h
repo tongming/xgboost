@@ -260,8 +260,12 @@ namespace xgboost{
         protected:
             EvalRankList(const char *name){
                 name_ = name;
+                minus_ = false;
                 if( sscanf(name, "%*[^@]@%u", &topn_) != 1 ){
                     topn_ = UINT_MAX;
+                }
+                if( name_.find("-") == 0){
+                    minus_ = true;
                 }
             }
             /*! \return evaluation metric, given the pair_sort record, (pred,label) */
@@ -269,6 +273,7 @@ namespace xgboost{
         protected:
             unsigned topn_;
             std::string name_;
+            bool minus_;
         };
         
         /*! \brief Precison at N, for both classification and rank */
@@ -298,7 +303,7 @@ namespace xgboost{
                 for( size_t i = 0; i < rec.size() && i < this->topn_; i ++ ){
                     const unsigned rel = rec[i].second;
                     if( rel != 0 ){ 
-                        sumdcg += ((1<<rel)-1) / logf( i + 2 );
+                        sumdcg += (( 1 << rel) - 1) / logf( i + 2 );
                     }
                 }
                 return static_cast<float>(sumdcg);
@@ -306,10 +311,16 @@ namespace xgboost{
             virtual float EvalMetric( std::vector< std::pair<float, unsigned> > &rec ) const {
                 std::sort(rec.begin(), rec.end(), CmpSecond);
                 float idcg = this->CalcDCG(rec);
+                if( idcg == 0.0f ) {
+                    if(minus_){
+                        return 0.0f;
+                    }else {
+                        return 1.0f;
+                    }
+                }
                 std::sort(rec.begin(), rec.end(), CmpFirst);
                 float dcg = this->CalcDCG(rec);
-                if( idcg == 0.0f ) return 0.0f;
-                else return dcg/idcg;
+                return dcg/idcg;
             }
         };
 
@@ -330,8 +341,16 @@ namespace xgboost{
                         }
                     }
                 }
-                if (nhits != 0) sumap /= nhits;
-                return static_cast<float>(sumap);                
+                if (nhits != 0) {
+                    sumap /= nhits;
+                    return static_cast<float>(sumap);
+                } else {
+                    if(minus_) {
+                        return 0.0f;
+                    }else{
+                        return 1.0f;
+                    }
+                }               
             }
         };
     };
@@ -351,8 +370,8 @@ namespace xgboost{
                 if (!strcmp(name, "auc"))    evals_.push_back(new EvalAuc());
                 if (!strncmp(name, "ams@",4))  evals_.push_back(new EvalAMS(name));
                 if (!strncmp(name, "pre@", 4)) evals_.push_back(new EvalPrecision(name));
-                if (!strncmp(name, "map", 3))   evals_.push_back(new EvalMAP(name));
-                if (!strncmp(name, "ndcg", 3))  evals_.push_back(new EvalNDCG(name));
+                if (!strncmp(name, "map", 3) || !strncmp(name, "-map", 4))   evals_.push_back(new EvalMAP(name));
+                if (!strncmp(name, "ndcg", 3) || !strncmp(name, "-ndcg", 4))  evals_.push_back(new EvalNDCG(name));
             }
             ~EvalSet(){
                 for (size_t i = 0; i < evals_.size(); ++i){
