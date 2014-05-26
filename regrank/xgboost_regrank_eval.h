@@ -242,8 +242,16 @@ namespace xgboost{
                     rec.push_back(std::make_pair(preds[j], j));
                 }
                 std::sort(rec.begin(), rec.end(), CmpFirst);
+                double pratio = CalcPRatio( rec, info );
+                return static_cast<float>(pratio);
+            }
+            virtual const char *Name(void) const{
+                return name_.c_str();
+            }
+        protected:
+            inline double CalcPRatio( const std::vector< std::pair<float,unsigned> >& rec, const DMatrix::Info &info ) const{
                 double wt_sum = 0.0, wt_pos = 0.0;
-                for (size_t j = 0; j < preds.size(); ++j){
+                for (size_t j = 0; j < info.labels.size(); ++j){
                     const float w = info.GetWeight(j);
                     wt_sum += w;
                     wt_pos += info.labels[j] * w ;
@@ -257,10 +265,7 @@ namespace xgboost{
                     wt_tcum += wt;
                     wt_hit += ctr * wt;
                 }
-                return static_cast<float>(wt_hit / wt_pos);
-            }
-            virtual const char *Name(void) const{
-                return name_.c_str();
+                return wt_hit / wt_pos;
             }
         protected:
             float ratio_;
