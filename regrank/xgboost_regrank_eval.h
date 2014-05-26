@@ -227,6 +227,46 @@ namespace xgboost{
             }
         };
 
+
+        /*! \brief precision with cut off at top percentile */
+        struct EvalPrecisionRatio : public IEvaluator{
+        public:
+            EvalPrecisionRatio( const char *name ):name_(name){
+                utils::Assert( sscanf( name, "pratio@%f", &ratio_) == 1, "BUG" );
+            }
+            virtual float Eval(const std::vector<float> &preds,
+                               const DMatrix::Info &info) const {
+                utils::Assert( preds.size() == info.labels.size(), "label size predict size not match" );
+                std::vector< std::pair<float, unsigned> > rec;
+                for (size_t j = 0; j < preds.size(); ++j){
+                    rec.push_back(std::make_pair(preds[j], j));
+                }
+                std::sort(rec.begin(), rec.end(), CmpFirst);
+                double wt_sum = 0.0, wt_pos = 0.0;
+                for (size_t j = 0; j < preds.size(); ++j){
+                    const float w = info.GetWeight(j);
+                    wt_sum += w;
+                    wt_pos += info.labels[j] * w ;
+                }
+                double wt_ratio = wt_sum * ratio_;
+                double wt_hit = 0.0, wt_tcum = 0.0;
+                for (size_t j = 0; j < rec.size(); ++j){
+                    const float wt = info.GetWeight(rec[j].second);
+                    const float ctr = info.labels[rec[j].second];                    
+                    if( wt_tcum >= wt_ratio ) break;
+                    wt_tcum += wt;
+                    wt_hit += ctr * wt;
+                }
+                return static_cast<float>(wt_hit / wt_pos);
+            }
+            virtual const char *Name(void) const{
+                return name_.c_str();
+            }
+        protected:
+            float ratio_;
+            std::string name_;
+        };
+
         /*! \brief Evaluate rank list */          
         struct EvalRankList : public IEvaluator{
         public:
@@ -372,6 +412,7 @@ namespace xgboost{
                 if (!strcmp(name, "auc"))    evals_.push_back(new EvalAuc());
                 if (!strncmp(name, "ams@",4))  evals_.push_back(new EvalAMS(name));
                 if (!strncmp(name, "pre@", 4)) evals_.push_back(new EvalPrecision(name));
+                if (!strncmp(name, "pratio@", 7)) evals_.push_back(new EvalPrecisionRatio(name));
                 if (!strncmp(name, "map", 3))   evals_.push_back(new EvalMAP(name));
                 if (!strncmp(name, "ndcg", 3))  evals_.push_back(new EvalNDCG(name));
             }
