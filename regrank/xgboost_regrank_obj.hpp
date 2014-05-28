@@ -145,9 +145,17 @@ namespace xgboost{
         class SoftmaxRankObj : public IObjFunction{
         public:
             SoftmaxRankObj(void){
+                scale_pos_weight = 1.0f;
+                walpha = 1.0f;
+                num_group = 2;
+                num_repeat    = 2;
             }
             virtual ~SoftmaxRankObj(){}
             virtual void SetParam(const char *name, const char *val){
+                if( !strcmp( "scale_pos_weight", name ) ) scale_pos_weight = (float)atof( val );
+                if( !strcmp( "walpha", name ) )  walpha = (float)atof( val );
+                if( !strcmp( "softrank:repeat", name) ) num_repeat = (unsigned)atoi( val );
+                if( !strcmp( "softrank:group", name) )  num_group = (unsigned)atoi( val );
             }
             virtual void GetGradient(const std::vector<float>& preds,  
                                      const DMatrix::Info &info,
@@ -161,65 +169,55 @@ namespace xgboost{
                 utils::Assert( gptr.size() != 0 && gptr.back() == preds.size(), "SoftmaxRank: invalid group file" );
                 const unsigned ngroup = static_cast<unsigned>( gptr.size() - 1 );
 
-                for (unsigned k = 0; k < ngroup; ++k){                    
-                    float rmax = std::numeric_limits<float>::min();
+                for (unsigned k = 0; k < ngroup; ++k){
+                    std::vector<unsigned> pos_index, neg_index;
                     for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
-                        if( info.labels[j] != 1.0f ) {
-                            if( preds[j] < rmax ) rmax = preds[j];
-                        }
-                    }
-                    utils::Assert( rmax != std::numeric_limits<float>::min(), "there is no negative sample in training data" );
-                    
-                    double sum_exp = 0.0f;
-
-                    #pragma omp parallel for reduction(+:sum_exp) schedule(static)
-                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
-                        if( info.labels[j] != 1.0f ) {
-                            // store prob in grad, be careful though
-                            grad[j] = exp(preds[j] - rmax);
-                            sum_exp += grad[j];
-                        }
-                    }   
-
-                    // joint energy of all negative samples
-                    const float neg_energy = rmax + log( sum_exp );
-                    double sum_negprob = 0.0, sum_negpsqr = 0.0;
-                    
-                    #pragma omp parallel for reduction(+:sum_negprob, sum_negpsqr) schedule(static)
-                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
-                        if( info.labels[j] != 1.0f ) {
-                            grad[j] /= sum_exp;
+                        if( info.labels[j] == 1.0f ) {
+                            pos_index.push_back( j );
                         }else{
-                            const float pos_energy = preds[j];
-                            const float base = std::max( neg_energy, pos_energy );
-                            const float a = std::exp( pos_energy - base );
-                            const float b = std::exp( neg_energy - base );
-                            const float p = a / ( a + b );
-                            const float w = info.GetWeight( j );
-                            // positive gradient and hessian
-                            grad[j] = (p - 1.0f) * w;
-                            hess[j] = 2.0f * p * ( 1.0f - p ) * w;
-                            // negative statistics
-                            const float q = b / ( a + b );
-                            sum_negprob += q * w; sum_negpsqr += q * q * w;
+                            neg_index.push_back( j );
                         }
+                        grad[j] = hess[j] = 0.0f;
                     }
-
-                    #pragma omp parallel for schedule(static)                    
-                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
-                        if( info.labels[j] != 1.0f ) {
-                            const double plocal = grad[j];
-                            grad[j] = plocal * sum_negprob;
-                            hess[j] = plocal * ( sum_negprob - plocal * sum_negpsqr ) * 2.0f;
-                            utils::Assert( hess[j] > 0.0f, "SoftmaxRank: generate negative hessian" );
-                        }                        
-                    }
+                    random::Shuffle( pos_index );
+                    for(unsigned iter = 0; iter < num_repeat; ++ iter){
+                        random::Shuffle( neg_index );
+                        const unsigned nneg = neg_index.size();
+                        #pragma omp parallel 
+                        {
+                            std::vector<float> rec( num_group + 1 );
+                            #pragma omp for schedule(static)
+                            for( unsigned i = 0; i < nneg; i += num_group ){
+                                for( unsigned j = 0; j < num_group; ++ j ){
+                                    rec[j] = preds[ neg_index[ i + j ] ];
+                                }
+                                const unsigned pindex = pos_index[ (i/num_group)  % pos_index.size() ];
+                                rec.back() = preds[ pindex ];
+                                const float pw = info.GetWeight( pindex ) * scale_pos_weight;
+                                Softmax( rec );
+                                for( unsigned j = 0; j < num_group; ++ j ){
+                                    const float p = rec[j];
+                                    const unsigned nindex = neg_index[ i + j ];
+                                    grad[nindex] += p * pw; hess[nindex] += 2.0f * p * (1.0f-p) * pw;
+                                }
+                                {// positive statis
+                                    const float p = rec.back();
+                                    grad[pindex] += (p-1.0f) * pw;
+                                    hess[pindex] += 2.0f * p * (1.0f-p) *pw;
+                                }
+                            }
+                        }
+                    }                    
                 }
             }
 
             virtual const char* DefaultEvalMetric(void) {
-                return "pre@1";
+                return "auc";
             }
+        private:
+            float walpha;
+            float scale_pos_weight;
+            unsigned num_group, num_repeat;
         };
 
         // simple softmax multi-class classification
