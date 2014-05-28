@@ -5,9 +5,9 @@
  * \brief implementation of objective functions
  * \author Tianqi Chen, Kailong Chen
  */
-//#include "xgboost_regrank_sample.h"
 #include <vector>
-#include <functional>
+#include <cmath>
+#include <limits>
 #include "xgboost_regrank_utils.h"
 
 namespace xgboost{
@@ -53,9 +53,90 @@ namespace xgboost{
                     preds[j] = loss.PredTransform( preds[j] );
                 }
             }
-        private:
+        protected:
             float scale_pos_weight;
             LossType loss;
+        };
+    };
+
+    namespace regrank{
+        class RegTopObj: public RegressionObj{
+        public:
+            RegTopObj() : RegressionObj(LossType::kLogisticRaw){                
+                wratio = 0.05;
+                walpha = 0.8;
+                wbeta = 0.0;
+            }
+            virtual void SetParam(const char *name, const char *val){
+                RegressionObj::SetParam( name, val );
+                if( !strcmp( "regtop:wratio", name ) )  wratio = atof(val); 
+                if( !strcmp( "regtop:walpha", name ) )  walpha = atof(val); 
+                if( !strcmp( "regtop:wbeta", name ) )   wbeta = atof(val); 
+            }
+            virtual void GetGradient(const std::vector<float>& preds,  
+                                     const DMatrix::Info &info,
+                                     int iter,
+                                     std::vector<float> &grad, 
+                                     std::vector<float> &hess ) {
+                utils::Assert( preds.size() == info.labels.size(), "label size predict size not match" );
+                const unsigned ndata = static_cast<unsigned>(preds.size());
+                std::vector< std::pair<float, unsigned> > rec( preds.size() );
+                std::vector<float> tweight( preds.size() );
+                
+                #pragma omp parallel for schedule( static )
+                for (unsigned j = 0; j < ndata; ++j){
+                    rec[j] = std::make_pair( preds[j], j );
+                }
+                std::sort( rec.begin(), rec.end(), CmpFirst );
+                grad.resize(preds.size()); hess.resize(preds.size());
+
+                double wsum_neg = 0.0, wsum_pos = 0.0;
+                #pragma omp parallel for reduction(+:wsum_pos, wsum_neg) schedule( static ) 
+                for( unsigned j = 0;  j < ndata; ++j ){
+                    float w = info.GetWeight(j);                    
+                    if( info.labels[j] == 1.0f ){ 
+                        wsum_pos += w;
+                    }else{
+                        wsum_neg += w;
+                    }
+                }
+                double wsum_part = 0.0, rsum_neg = 0.0, wsum_all = wsum_pos + wsum_neg;
+                double sumratio = wsum_all * wratio;
+                for (unsigned j = 0; j < ndata; ++j){
+                    const unsigned ridx = rec[j].second;
+                    const float label = info.labels[ridx];
+                    const float w = info.GetWeight(ridx);
+                    if( label == 1.0f ){
+                        tweight[ridx] =  w * scale_pos_weight;
+                    }else{
+                        if( wbeta == 0.0f ){
+                            if( wsum_part < sumratio ){
+                                tweight[ridx] = w;
+                            }else{
+                                tweight[ridx] = w * (1.0f-walpha);
+                            }
+                        }else{
+                            float ps = (wsum_all - wsum_part) / wsum_all;
+                            tweight[ridx] = powf( ps, wbeta ) * w;
+                        }
+                        rsum_neg += tweight[ridx];
+                    }
+                    wsum_part += w;
+                }
+
+                float wscale = wsum_neg / rsum_neg;
+                #pragma omp parallel for schedule( static )
+                for (unsigned j = 0; j < ndata; ++j){
+                    float p = loss.PredTransform(preds[j]);
+                    float w = tweight[j];
+                    if( info.labels[j] != 1.0f ) w *= wscale;
+                    grad[j] = loss.FirstOrderGradient(p, info.labels[j]) * w;
+                    hess[j] = loss.SecondOrderGradient(p, info.labels[j]) * w;
+                }
+            }
+        private:
+            float wbeta;
+            float wratio, walpha;
         };
     };
 
@@ -75,35 +156,67 @@ namespace xgboost{
                                      std::vector<float> &hess ) {
                 utils::Assert( preds.size() == info.labels.size(), "label size predict size not match" );
                 grad.resize(preds.size()); hess.resize(preds.size());
-                const std::vector<unsigned> &gptr = info.group_ptr;
-                utils::Assert( gptr.size() != 0 && gptr.back() == preds.size(), "rank loss must have group file" );
+                std::vector<unsigned> tgptr(2, 0); tgptr[1] = preds.size();
+                const std::vector<unsigned> &gptr = info.group_ptr.size() == 0 ? tgptr : info.group_ptr;
+                utils::Assert( gptr.size() != 0 && gptr.back() == preds.size(), "SoftmaxRank: invalid group file" );
                 const unsigned ngroup = static_cast<unsigned>( gptr.size() - 1 );
 
-                #pragma omp parallel
-                {
-                    std::vector< float > rec;                    
-                    #pragma omp for schedule(static)
-                    for (unsigned k = 0; k < ngroup; ++k){
-                        rec.clear();
-                        int nhit = 0;
-                        for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
-                            rec.push_back( preds[j] );
-                            grad[j] = hess[j] = 0.0f;
-                            nhit += info.labels[j];
+                for (unsigned k = 0; k < ngroup; ++k){                    
+                    float rmax = std::numeric_limits<float>::min();
+                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
+                        if( info.labels[j] != 1.0f ) {
+                            if( preds[j] < rmax ) rmax = preds[j];
                         }
-                        Softmax( rec );
-                        if( nhit == 1 ){
-                            for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
-                                float p = rec[ j - gptr[k] ];
-                                grad[j] = p - info.labels[j];
-                                hess[j] = 2.0f * p * ( 1.0f - p );
-                            }  
+                    }
+                    utils::Assert( rmax != std::numeric_limits<float>::min(), "there is no negative sample in training data" );
+                    
+                    double sum_exp = 0.0f;
+
+                    #pragma omp parallel for reduction(+:sum_exp) schedule(static)
+                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
+                        if( info.labels[j] != 1.0f ) {
+                            // store prob in grad, be careful though
+                            grad[j] = exp(preds[j] - rmax);
+                            sum_exp += grad[j];
+                        }
+                    }   
+
+                    // joint energy of all negative samples
+                    const float neg_energy = rmax + log( sum_exp );
+                    double sum_negprob = 0.0, sum_negpsqr = 0.0;
+                    
+                    #pragma omp parallel for reduction(+:sum_negprob, sum_negpsqr) schedule(static)
+                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
+                        if( info.labels[j] != 1.0f ) {
+                            grad[j] /= sum_exp;
                         }else{
-                            utils::Assert( nhit == 0, "softmax does not allow multiple labels" );
+                            const float pos_energy = preds[j];
+                            const float base = std::max( neg_energy, pos_energy );
+                            const float a = std::exp( pos_energy - base );
+                            const float b = std::exp( neg_energy - base );
+                            const float p = a / ( a + b );
+                            const float w = info.GetWeight( j );
+                            // positive gradient and hessian
+                            grad[j] = (p - 1.0f) * w;
+                            hess[j] = 2.0f * p * ( 1.0f - p ) * w;
+                            // negative statistics
+                            const float q = b / ( a + b );
+                            sum_negprob += q * w; sum_negpsqr += q * q * w;
                         }
+                    }
+
+                    #pragma omp parallel for schedule(static)                    
+                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
+                        if( info.labels[j] != 1.0f ) {
+                            const double plocal = grad[j];
+                            grad[j] = plocal * sum_negprob;
+                            hess[j] = plocal * ( sum_negprob - plocal * sum_negpsqr ) * 2.0f;
+                            utils::Assert( hess[j] > 0.0f, "SoftmaxRank: generate negative hessian" );
+                        }                        
                     }
                 }
             }
+
             virtual const char* DefaultEvalMetric(void) {
                 return "pre@1";
             }
