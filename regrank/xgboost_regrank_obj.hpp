@@ -148,7 +148,7 @@ namespace xgboost{
                 scale_pos_weight = 1.0f;
                 walpha = 1.0f;
                 num_group = 2;
-                num_repeat = 2;
+                num_repeat = 1;
             }
             virtual ~SoftmaxRankObj(){}
             virtual void SetParam(const char *name, const char *val){
@@ -259,11 +259,12 @@ namespace xgboost{
                     #pragma omp parallel 
                     {
                         std::vector<float> rec( this->num_group + 1 );
-                        std::vector<unsigned> neg_sample( ngroup ); 
+                        std::vector<unsigned> neg_sample( num_group ); 
                         random::Random rnd; rnd.Seed( iter * 1111 + omp_get_thread_num() );
-                        const unsigned nrep = this->num_repeat * pos_index.size();
-                        const float scale = this->scale_pos_weight / this->num_repeat;
-                        
+                        const unsigned nrep = this->num_repeat * neg_index.size();
+                        const float scale = this->scale_pos_weight * pos_index.size() / this->num_repeat;
+
+                        random::Shuffle( pos_index );
                         #pragma omp for schedule(static)                      
                         for( unsigned i = 0; i  < nrep; ++ i ){
                             const unsigned pindex = pos_index[ i % pos_index.size() ];                                                               
