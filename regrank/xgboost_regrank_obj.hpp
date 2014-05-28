@@ -148,7 +148,7 @@ namespace xgboost{
                 scale_pos_weight = 1.0f;
                 walpha = 1.0f;
                 num_group = 2;
-                num_repeat    = 2;
+                num_repeat = 2;
             }
             virtual ~SoftmaxRankObj(){}
             virtual void SetParam(const char *name, const char *val){
@@ -175,51 +175,127 @@ namespace xgboost{
                         if( info.labels[j] == 1.0f ) {
                             pos_index.push_back( j );
                         }else{
+                            
                             neg_index.push_back( j );
                         }
                         grad[j] = hess[j] = 0.0f;
                     }
-                    random::Shuffle( pos_index );
+
                     for(unsigned iter = 0; iter < num_repeat; ++ iter){
+                        random::Shuffle( pos_index );
                         random::Shuffle( neg_index );
                         const unsigned nneg = neg_index.size();
                         #pragma omp parallel 
                         {
                             std::vector<float> rec( num_group + 1 );
                             #pragma omp for schedule(static)
-                            for( unsigned i = 0; i < nneg; i += num_group ){
+                            for( unsigned i = 0; i  < nneg - num_group + 1; i += num_group ){
                                 for( unsigned j = 0; j < num_group; ++ j ){
                                     rec[j] = preds[ neg_index[ i + j ] ];
                                 }
                                 const unsigned pindex = pos_index[ (i/num_group)  % pos_index.size() ];
                                 rec.back() = preds[ pindex ];
-                                const float pw = info.GetWeight( pindex ) * scale_pos_weight;
+                                const float pw = info.GetWeight( pindex );
                                 Softmax( rec );
                                 for( unsigned j = 0; j < num_group; ++ j ){
                                     const float p = rec[j];
                                     const unsigned nindex = neg_index[ i + j ];
-                                    grad[nindex] += p * pw; hess[nindex] += 2.0f * p * (1.0f-p) * pw;
+                                    grad[nindex] += p * pw; 
+                                    hess[nindex] += p * (1.0f-p) * pw; 
                                 }
                                 {// positive statis
                                     const float p = rec.back();
                                     grad[pindex] += (p-1.0f) * pw;
-                                    hess[pindex] += 2.0f * p * (1.0f-p) *pw;
+                                    hess[pindex] += p * (1.0f-p) *pw;
                                 }
                             }
                         }
-                    }                    
+                    }
+                    const float scale = scale_pos_weight *  static_cast<float>( pos_index.size() * num_group ) / neg_index.size();
+                    #pragma omp parallel for schedule(static)                    
+                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
+                        grad[j] *= scale; hess[j] *= scale;
+                    }
                 }
             }
-
             virtual const char* DefaultEvalMetric(void) {
                 return "auc";
             }
-        private:
+        protected:
             float walpha;
             float scale_pos_weight;
             unsigned num_group, num_repeat;
         };
+        
+        class SoftmaxWeightRankObj: public SoftmaxRankObj{
+        public:
+            virtual void GetGradient(const std::vector<float>& preds,  
+                                     const DMatrix::Info &info,
+                                     int iter,
+                                     std::vector<float> &grad, 
+                                     std::vector<float> &hess ) {
+                utils::Assert( preds.size() == info.labels.size(), "label size predict size not match" );
+                grad.resize(preds.size()); hess.resize(preds.size());
+                std::vector<unsigned> tgptr(2, 0); tgptr[1] = preds.size();
+                const std::vector<unsigned> &gptr = info.group_ptr.size() == 0 ? tgptr : info.group_ptr;
+                utils::Assert( gptr.size() != 0 && gptr.back() == preds.size(), "SoftmaxRank: invalid group file" );
+                const unsigned ngroup = static_cast<unsigned>( gptr.size() - 1 );
 
+                for (unsigned k = 0; k < ngroup; ++k){
+                    std::vector<unsigned> pos_index, neg_index;
+                    double neg_wsum = 0.0;
+                    std::vector<float> neg_wvec;
+                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
+                        if( info.labels[j] == 1.0f ) {
+                            pos_index.push_back( j );
+                        }else{                            
+                            neg_index.push_back( j );
+                            neg_wsum += info.GetWeight( j );
+                            neg_wvec.push_back( neg_wsum );
+                        }
+                        grad[j] = hess[j] = 0.0f;
+                    }
+                    
+                    #pragma omp parallel 
+                    {
+                        std::vector<float> rec( this->num_group + 1 );
+                        std::vector<unsigned> neg_sample( ngroup ); 
+                        random::Random rnd; rnd.Seed( iter * 1111 + omp_get_thread_num() );
+                        const unsigned nrep = this->num_repeat * pos_index.size();
+                        const float scale = this->scale_pos_weight / this->num_repeat;
+                        
+                        #pragma omp for schedule(static)                      
+                        for( unsigned i = 0; i  < nrep; ++ i ){
+                            const unsigned pindex = pos_index[ i % pos_index.size() ];                                                               
+                            for( unsigned j = 0; j < this->num_group; ++ j ){
+                                // sample negative sample
+                                float r = rnd.RandDouble() * neg_wsum;
+                                size_t idx = std::lower_bound( neg_wvec.begin(), neg_wvec.end(), r ) - neg_wvec.begin();
+                                if( idx == neg_wvec.size() ) idx = neg_wvec.size() - 1;
+                                neg_sample[j] = neg_index[idx];
+                                // finish generate neg sample
+                                rec[j] = preds[ neg_sample[j] ];
+                            }                                
+                            rec.back() = preds[ pindex ];
+                            const float pw = info.GetWeight( pindex ) * scale;                                
+                            Softmax( rec );
+                            for( unsigned j = 0; j < this->num_group; ++ j ){
+                                const float p = rec[j];
+                                const unsigned nindex = neg_sample[j];
+                                grad[nindex] += p * pw; 
+                                hess[nindex] += p * (1.0f-p) * pw; 
+                            }
+                            {// positive statis
+                                const float p = rec.back();
+                                grad[pindex] += (p-1.0f) * pw;
+                                hess[pindex] += p * (1.0f-p) *pw;
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        
         // simple softmax multi-class classification
         class SoftmaxMultiClassObj : public IObjFunction{
         public:

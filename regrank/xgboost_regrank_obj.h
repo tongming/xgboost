@@ -120,6 +120,7 @@ namespace xgboost{
            if( !strcmp("rank:ndcg", name ) ) return new LambdaRankObj_NDCG();
 		   if( !strcmp("rank:map", name ) ) return new LambdaRankObj_MAP();
            if( !strcmp("rank:softmax", name ) )  return new SoftmaxRankObj();
+           if( !strcmp("rank:wsoftmax", name ) )  return new SoftmaxWeightRankObj();
            utils::Error("unknown objective function type");
            return NULL;
        }
