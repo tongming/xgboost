@@ -415,6 +415,8 @@ namespace xgboost{
             float colsample_bylevel;
             // whether to subsample columns during tree construction
             float colsample_bytree;
+            // speed optimization for dense column 
+            float opt_dense_col;
             // number of threads to be used for tree construction, if OpenMP is enabled, if equals 0, use system default
             int nthread;
             /*! \brief constructor */
@@ -429,6 +431,7 @@ namespace xgboost{
                 colsample_bytree = 1.0f;
                 colsample_bylevel = 1.0f;
                 use_layerwise = 0;
+                opt_dense_col = 1.0f;
                 nthread = 0;
             }
             /*! 
@@ -452,6 +455,7 @@ namespace xgboost{
                 if( !strcmp( name, "colsample_bylevel") ) colsample_bylevel  = (float)atof( val );
                 if( !strcmp( name, "colsample_bytree") )  colsample_bytree  = (float)atof( val );
                 if( !strcmp( name, "use_layerwise") )     use_layerwise = atoi( val );
+                if( !strcmp( name, "opt_dense_col") )     opt_dense_col = (float)atof( val );
                 if( !strcmp( name, "nthread") )           nthread = atoi( val );
                 if( !strcmp( name, "default_direction") ) {
                     if( !strcmp( val, "learn") )  default_direction = 0;
@@ -516,12 +520,12 @@ namespace xgboost{
                 else return parent_base_weight + CalcWeight( sum_grad + parent_base_weight * sum_hess, sum_hess );
             }           
             /*! \brief whether need forward small to big search: default right */
-            inline bool need_forward_search( void ) const{
+            inline bool need_forward_search( float col_density = 0.0f ) const{
                 return this->default_direction != 1;
             }
-            /*! \brief whether need forward big to small search: default left */
-            inline bool need_backward_search( void ) const{
-                return this->default_direction != 2;
+            /*! \brief whether need backward big to small search: default left */
+            inline bool need_backward_search( float col_density = 0.0f ) const{
+                return this->default_direction == 1 || (default_direction == 0 && (col_density<opt_dense_col) );
             }
             /*! \brief given the loss change, whether we need to invode prunning */
             inline bool need_prune( double loss_chg, int depth ) const{

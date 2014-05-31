@@ -189,10 +189,11 @@ namespace xgboost{
                     for( unsigned i = 0; i < nsize; ++ i ){
                         const unsigned fid = feat_set[i];
                         const int tid = omp_get_thread_num();
-                        if( param.need_forward_search() ){
+                        
+                        if( param.need_forward_search( smat.GetColDensity(fid) ) ){
                             this->EnumerateSplit( smat.GetSortedCol(fid), fid, stemp[tid], true );
                         }
-                        if( param.need_backward_search() ){
+                        if( param.need_backward_search( smat.GetColDensity(fid) ) ){
                             this->EnumerateSplit( smat.GetReverseSortedCol(fid), fid, stemp[tid], false );
                         }
                     }
@@ -295,10 +296,10 @@ namespace xgboost{
                         if( smat.GetSortedCol(i).Next() && constrain.NotBanned(i) ){
                             feat_index.push_back( i );
                         }
-                    }                    
+                    }
                     unsigned n = static_cast<unsigned>( param.colsample_bytree * feat_index.size() );
                     random::Shuffle( feat_index );
-                    utils::Assert( n > 0, "colsample_bytree is too small that no feature can be included" );
+                    utils::Assert( n > 0, "colsample_bytree is too small that no feature can be included" );                    
                     feat_index.resize( n );
                 }
                 {// setup temp space for each thread
