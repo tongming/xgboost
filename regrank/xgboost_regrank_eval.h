@@ -249,7 +249,7 @@ namespace xgboost{
                         for (unsigned j = gptr[k]; j < gptr[k + 1]; ++j){
                             rec.push_back(std::make_pair(preds[j], (int)info.labels[j]));
                         }
-                        sum_metric += this->EvalMetric( rec );                        
+                        sum_metric += this->EvalMetric( rec );
                     }
                 }
                 return static_cast<float>(sum_metric) / ngroup;
@@ -311,7 +311,9 @@ namespace xgboost{
                 return static_cast<float>(sumdcg);
             }
             virtual float EvalMetric( std::vector< std::pair<float, unsigned> > &rec ) const {
-                std::sort(rec.begin(), rec.end(), CmpSecond);
+                std::stable_sort (rec.begin(), rec.end(), CmpFirst);
+                float dcg = this->CalcDCG(rec);
+                std::stable_sort (rec.begin(), rec.end(), CmpSecond);
                 float idcg = this->CalcDCG(rec);
                 if( idcg == 0.0f ) {
                     if(minus_){
@@ -320,9 +322,7 @@ namespace xgboost{
                         return 1.0f;
                     }
                 }
-                std::sort(rec.begin(), rec.end(), CmpFirst);
-                float dcg = this->CalcDCG(rec);
-                return dcg/idcg;
+		return dcg/idcg;
             }
         };
 
