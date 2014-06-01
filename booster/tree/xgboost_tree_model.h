@@ -521,11 +521,11 @@ namespace xgboost{
             }           
             /*! \brief whether need forward small to big search: default right */
             inline bool need_forward_search( float col_density = 0.0f ) const{
-                return this->default_direction != 1;
+                return this->default_direction == 2 || (default_direction == 0 && (col_density<opt_dense_col) );
             }
             /*! \brief whether need backward big to small search: default left */
             inline bool need_backward_search( float col_density = 0.0f ) const{
-                return this->default_direction == 1 || (default_direction == 0 && (col_density<opt_dense_col) );
+                return this->default_direction != 2;
             }
             /*! \brief given the loss change, whether we need to invode prunning */
             inline bool need_prune( double loss_chg, int depth ) const{
