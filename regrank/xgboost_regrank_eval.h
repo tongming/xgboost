@@ -426,14 +426,18 @@ namespace xgboost{
                     delete evals_[i];
                 }
             }
-            inline void Eval(FILE *fo, const char *evname,
-                const std::vector<float> &preds,
-                const DMatrix::Info &info) const{
-                for (size_t i = 0; i < evals_.size(); ++i){
-                    float res = evals_[i]->Eval(preds, info);
-                    fprintf(fo, "\t%s-%s:%f", evname, evals_[i]->Name(), res);
-                }
-            }
+            inline std::string Eval(const char *evname,
+                                    const std::vector<float> &preds,
+                                    const DMatrix::Info &info) const{
+              std::string result = "";
+              for (size_t i = 0; i < evals_.size(); ++i){
+                  float res = evals_[i]->Eval(preds, info);
+                  char tmp[1024];
+                  sprintf(tmp, "\t%s-%s:%f", evname, evals_[i]->Name(), res);
+                  result += tmp;
+              }
+              return result;
+          }
         private:
             std::vector<const IEvaluator*> evals_;
         };

@@ -193,20 +193,21 @@ namespace xgboost{
              * \param iter iteration number
              * \param evals datas i want to evaluate
              * \param evname name of each dataset
-             * \param fo file to output log
+             * \return a string corresponding to the evaluation result
              */
-            inline void EvalOneIter(int iter,
-                                    const std::vector<const DMatrix*> &evals,
-                                    const std::vector<std::string> &evname,
-                                    FILE *fo=stderr ){
-                fprintf(fo, "[%d]", iter);
+            inline std::string EvalOneIter(int iter,
+                                           const std::vector<const DMatrix*> &evals,
+                                           const std::vector<std::string> &evname ){
+                std::string res;
+                char tmp[256];
+                sprintf(tmp, "[%d]", iter);
+                res = tmp;
                 for (size_t i = 0; i < evals.size(); ++i){
                     this->PredictRaw(preds_, *evals[i]);
                     obj_->PredTransform(preds_);
-                    evaluator_.Eval(fo, evname[i].c_str(), preds_, evals[i]->info);
+                    res += evaluator_.Eval(evname[i].c_str(), preds_, evals[i]->info);
                 }
-                fprintf(fo, "\n");
-                fflush(fo);
+                return res;
             }
             /*! 
              * \brief get prediction
