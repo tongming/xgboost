@@ -279,7 +279,11 @@ extern "C"{
         if( strlen(fmap) != 0 ){ 
             featmap.LoadText( fmap );
         }
-        static_cast<Booster*>(handle)->DumpModel( fo, featmap, false );
+        std::vector<std::string> dump = static_cast<Booster*>(handle)->DumpModel( featmap, false );
+        for( size_t i = 0; i < dump.size(); ++ i ){
+            fprintf(fo,"booster[%lu]:\n", i);
+            fprintf(fo,"%s", dump[i].c_str() ); 
+        }
         fclose( fo );
     }
 

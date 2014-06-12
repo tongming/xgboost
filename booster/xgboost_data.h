@@ -8,6 +8,7 @@
  */
 
 #include <vector>
+#include <limits>
 #include <climits>
 #include "../utils/xgboost_utils.h"
 #include "../utils/xgboost_stream.h"
@@ -288,6 +289,7 @@ namespace xgboost{
              *        access, call this whenever we need column access
              */
             inline void InitData(void){
+                utils::Assert( this->NumRow() < std::numeric_limits<bst_uint>::max(), "UINT_MAX is the maximum number of instance supported by xgboost so far, change definition of bst_uint to 64 bit integer");
                 utils::SparseCSRMBuilder<REntry> builder(col_ptr_, col_data_);
                 builder.InitBudget(0);
                 for (size_t i = 0; i < this->NumRow(); i++){

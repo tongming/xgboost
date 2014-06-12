@@ -114,13 +114,14 @@ namespace xgboost{
              */
             virtual void PrintInfo(FILE *fo){}
             /*!
-             * \brief dump model into text file
-             * \param fo output stream
+             * \brief dump model into text
              * \param fmap feature map that may help give interpretations of feature
              * \param with_stats whether print statistics
+             * \return string that represents the tree
              */
-            virtual void DumpModel(FILE *fo, const utils::FeatMap& fmap, bool with_stats = false){
+            virtual std::string DumpModel(const utils::FeatMap& fmap, bool with_stats = false){
                 utils::Error("not implemented");
+                return std::string("");
             }
         public:
             /*! \brief virtual destructor */

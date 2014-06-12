@@ -138,15 +138,16 @@ namespace xgboost{
             }
             /*!
              * \brief DumpModel
-             * \param fo text file
              * \param fmap feature map that may help give interpretations of feature
              * \param with_stats whether print statistics
+             * \return a vector of dump for each of the tree
              */
-            inline void DumpModel(FILE *fo, const utils::FeatMap& fmap, bool with_stats){
+            inline std::vector<std::string> DumpModel(const utils::FeatMap& fmap, bool with_stats){
+                std::vector<std::string> dump;
                 for (size_t i = 0; i < boosters.size(); i++){
-                    fprintf(fo, "booster[%d]\n", (int)i);
-                    boosters[i]->DumpModel(fo, fmap, with_stats);
+                  dump.push_back( boosters[i]->DumpModel(fmap, with_stats) );
                 }
+                return dump;
             }
             /*!
              * \brief Dump path of all trees

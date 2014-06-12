@@ -217,7 +217,11 @@ namespace xgboost{
 
             inline void TaskDump(void){
                 FILE *fo = utils::FopenCheck(name_dump.c_str(), "w");
-                learner.DumpModel(fo, fmap, dump_model_stats != 0);
+                std::vector<std::string> dump = learner.DumpModel(fmap, dump_model_stats != 0);
+                for( size_t i = 0; i < dump.size(); ++ i ){
+                    fprintf(fo,"booster[%lu]:\n", i);
+                    fprintf(fo,"%s", dump[i].c_str() ); 
+                }
                 fclose(fo);
             }
             inline void TaskDumpPath(void){

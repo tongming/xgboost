@@ -156,8 +156,8 @@ namespace xgboost{
                 int pid = this->GetLeafIndex( feat, funknown, gid );
                 return tree[ pid ].leaf_value();
             }            
-            virtual void DumpModel( FILE *fo, const utils::FeatMap &fmap, bool with_stats ){
-                tree.DumpModel( fo, fmap, with_stats );
+          virtual std::string DumpModel( const utils::FeatMap &fmap, bool with_stats ){
+                return tree.DumpModel( fmap, with_stats );
             }
         private:
             inline void CollapseNode( std::vector<float> &grad, 

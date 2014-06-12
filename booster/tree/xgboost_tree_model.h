@@ -7,6 +7,8 @@
  * \author Tianqi Chen: tianqi.tchen@gmail.com
  */
 #include <cstring>
+// construct using sstream
+#include <sstream>
 #include "../../utils/xgboost_utils.h"
 #include "../../utils/xgboost_stream.h"
 
@@ -326,62 +328,63 @@ namespace xgboost{
                 return param.num_nodes - param.num_roots - param.num_deleted;
             }
             /*! \brief dump model to text file  */
-            inline void DumpModel( FILE *fo, const utils::FeatMap& fmap, bool with_stats ){
+            inline std::string DumpModel( const utils::FeatMap& fmap, bool with_stats ){
+                std::stringstream fo("");
                 this->Dump( 0, fo, fmap, 0, with_stats );
+                return fo.str();
             }
         private:
-            void Dump( int nid, FILE *fo, const utils::FeatMap& fmap, int depth, bool with_stats ){
+            void Dump( int nid, std::stringstream &fo, const utils::FeatMap& fmap, int depth, bool with_stats ){
                 for( int  i = 0;  i < depth; ++ i ){
-                    fprintf( fo, "\t" );
+                    fo << '\t';
                 }
                 if( nodes[ nid ].is_leaf() ){
-                    fprintf( fo, "%d:leaf=%f ", nid, nodes[ nid ].leaf_value() );
+                    fo << nid << ":leaf=" << nodes[ nid ].leaf_value();
                     if( with_stats ){
                         stat( nid ).Print( fo, true );
                     }
-                    fprintf( fo, "\n" );
+                    fo << '\n';
                 }else{
                     // right then left,
                     TSplitCond cond = nodes[ nid ].split_cond();
                     const unsigned split_index = nodes[ nid ].split_index();
-
                     if( split_index < fmap.size() ){
                         switch( fmap.type(split_index) ){
                         case utils::FeatMap::kIndicator:{
                             int nyes = nodes[ nid ].default_left()?nodes[nid].cright():nodes[nid].cleft();
-                            fprintf( fo, "%d:[%s] yes=%d,no=%d", 
-                                     nid, fmap.name( split_index ),
-                                     nyes, nodes[nid].cdefault() );
+                            fo << nid << ":[" << fmap.name( split_index ) << "] yes=" << nyes << ",no=" 
+                               << nodes[nid].cdefault();
                             break;                            
                         }
                         case utils::FeatMap::kInteger:{
-                            fprintf( fo, "%d:[%s<%d] yes=%d,no=%d,missing=%d", 
-                                     nid, fmap.name(split_index), int( float(cond)+1.0f), 
-                                     nodes[ nid ].cleft(), nodes[ nid ].cright(),
-                                     nodes[ nid ].cdefault() );
+                            fo << nid << ":[" << fmap.name( split_index ) << "<"<< int(float(cond)+1.0f) 
+                               << "] yes=" << nodes[nid].cleft() 
+                               << ",no=" << nodes[nid].cright()
+                               << ",missing=" << nodes[ nid ].cdefault();
                             break;
                         }
                         case utils::FeatMap::kFloat:
                         case utils::FeatMap::kQuantitive:{
-                            fprintf( fo, "%d:[%s<%f] yes=%d,no=%d,missing=%d", 
-                                     nid, fmap.name(split_index), float(cond), 
-                                     nodes[ nid ].cleft(), nodes[ nid ].cright(),
-                                     nodes[ nid ].cdefault() );
+                            fo << nid << ":[" << fmap.name( split_index ) << "<"<< float(cond)
+                               << "] yes=" << nodes[nid].cleft() 
+                               << ",no=" << nodes[nid].cright()
+                               << ",missing=" << nodes[ nid ].cdefault();
                             break;
                         }
                         default: utils::Error("unknown fmap type");
                         }
                     }else{
-                        fprintf( fo, "%d:[f%u<%f] yes=%d,no=%d,missing=%d", 
-                                 nid, split_index, float(cond), 
-                                 nodes[ nid ].cleft(), nodes[ nid ].cright(),
-                                 nodes[ nid ].cdefault() );
+                      fo << nid << ":[f" << split_index << "<"<< float(cond)
+                         << "] yes=" << nodes[nid].cleft() 
+                         << ",no=" << nodes[nid].cright()
+                         << ",missing=" << nodes[ nid ].cdefault();              
                     }
+                    
                     if( with_stats ){
-                        fprintf( fo, " ");
+                        fo << ' '; 
                         stat( nid ).Print( fo, false );
                     }
-                    fprintf( fo, "\n" );
+                    fo << '\n';
                     this->Dump( nodes[ nid ].cleft(), fo, fmap, depth+1, with_stats );
                     this->Dump( nodes[ nid ].cright(), fo, fmap, depth+1, with_stats );
                 }                
@@ -550,11 +553,11 @@ namespace xgboost{
             /*! \brief number of child that is leaf node known up to now */
             int   leaf_child_cnt;
             /*! \brief print information of current stats to fo */
-            inline void Print( FILE *fo, bool is_leaf ) const{
+            inline void Print( std::stringstream &fo, bool is_leaf ) const{
                 if( !is_leaf ){
-                    fprintf( fo, "gain=%f,cover=%f", loss_chg, sum_hess );
+                    fo << "gain=" << loss_chg << ",cover=" << sum_hess;
                 }else{
-                    fprintf( fo, "cover=%f", sum_hess );
+                    fo << "cover=" << sum_hess;
                 }
             }
         };
