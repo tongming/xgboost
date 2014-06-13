@@ -33,10 +33,17 @@ namespace xgboost{
                 int fid;
                 char fname[1256], ftype[1256];
                 while (fscanf(fi, "%d\t%[^\t]\t%s\n", &fid, fname, ftype) == 3){
-                    utils::Assert(fid == (int)names_.size(), "invalid fmap format");
-                    names_.push_back(std::string(fname));
-                    types_.push_back(GetType(ftype));
+                    this->PushBack(fid, fname, ftype);
                 }
+            }
+            /*!\brief push back feature map */
+            inline void PushBack( int fid, const char *fname, const char *ftype ){
+                utils::Assert(fid == (int)names_.size(), "invalid fmap format");
+                names_.push_back(std::string(fname));
+                types_.push_back(GetType(ftype));
+            }
+            inline void Clear(void){
+                names_.clear(); types_.clear();
             }
             /*! \brief number of known features */
             size_t size(void) const{
@@ -51,7 +58,7 @@ namespace xgboost{
             const Type& type(size_t idx) const{
                 utils::Assert(idx < names_.size(), "utils::FMap::name feature index exceed bound");
                 return types_[idx];
-            }
+            }          
         private:
             inline static Type GetType(const char *tname){
                 if (!strcmp("i", tname)) return kIndicator;
