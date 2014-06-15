@@ -220,6 +220,22 @@ namespace xgboost{
                 }
                 return res;
             }
+            /*!
+             * \brief simple evaluation function, with a specified metric
+             * \param data input data
+             * \param metric name of metric
+             * \return a pair of <evaluation name, result>, if metric is not supported return a empty string in name
+             */
+            std::pair<std::string, float> Evaluate( const DMatrix &data, std::string metric ){
+                if( metric == "auto" ) metric = obj_->DefaultEvalMetric();
+                IEvaluator *ev = EvalSet::Create( metric.c_str() );
+                if( ev == NULL )  return std::make_pair(std::string(""),0.0f);
+                std::vector<float> preds;
+                this->Predict( preds, data );
+                float res = ev->Eval( preds, data.info );
+                delete ev;
+                return std::make_pair( metric, res );
+            }
             /*! 
              * \brief get prediction
              * \param storage to store prediction
