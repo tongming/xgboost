@@ -51,7 +51,7 @@ namespace xgboost{
                  * \param name name of the parameter
                  * \param val  value of the parameter
                  */
-                inline void SetParam( const char *name, const char *val ){
+                inline void SetParam( const char *name, const char *val ){                    
                     if( !strcmp("num_roots", name ) )    num_roots = atoi( val );
                     if( !strcmp("num_feature", name ) )  num_feature = atoi( val );
                 }
@@ -330,7 +330,9 @@ namespace xgboost{
             /*! \brief dump model to text file  */
             inline std::string DumpModel( const utils::FeatMap& fmap, bool with_stats ){
                 std::stringstream fo("");
-                this->Dump( 0, fo, fmap, 0, with_stats );
+                for( int i = 0; i < param.num_roots; ++ i ){  
+                    this->Dump( i, fo, fmap, 0, with_stats );
+                }
                 return fo.str();
             }
         private:

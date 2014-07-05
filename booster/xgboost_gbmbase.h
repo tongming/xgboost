@@ -23,7 +23,7 @@ namespace xgboost{
          * \brief a base model class,
          *        that assembles the ensembles of booster together and provide single routines to do prediction buffer and update
          *        this class can be used as base code to create booster variants
-         *         *
+         *         
          *  relation to xgboost.h:
          *    (1) xgboost.h provides a interface to a single booster(e.g. a single regression tree )
          *        while GBMBaseModel builds upon IBooster to build a class that
@@ -59,7 +59,7 @@ namespace xgboost{
              * \param name name of the parameter
              * \param val  value of the parameter
              */
-            inline void SetParam(const char *name, const char *val){
+            virtual void SetParam(const char *name, const char *val){
                 if (!strncmp(name, "bst:", 4)){
                     cfg.PushBack(name + 4, val);
                 }
@@ -73,7 +73,7 @@ namespace xgboost{
              * \brief load model from stream
              * \param fi input stream
              */
-            inline void LoadModel(utils::IStream &fi){
+            virtual void LoadModel(utils::IStream &fi){
                 if (boosters.size() != 0) this->FreeSpace();
                 utils::Assert(fi.Read(&mparam, sizeof(ModelParam)) != 0);
                 boosters.resize(mparam.num_boosters);
@@ -98,7 +98,7 @@ namespace xgboost{
              * \brief save model to stream
              * \param fo output stream
              */
-            inline void SaveModel(utils::IStream &fo) const {
+            virtual void SaveModel(utils::IStream &fo) const {
                 utils::Assert(mparam.num_boosters == (int)boosters.size());
                 fo.Write(&mparam, sizeof(ModelParam));
                 for (size_t i = 0; i < boosters.size(); i++){
@@ -115,7 +115,7 @@ namespace xgboost{
             /*!
              * \brief initialize the current data storage for model, if the model is used first time, call this function
              */
-            inline void InitModel(void){
+            virtual void InitModel(void){
                 pred_buffer.clear(); pred_counter.clear();
                 pred_buffer.resize(mparam.PredBufferSize(), 0.0);
                 pred_counter.resize(mparam.PredBufferSize(), 0);
@@ -126,7 +126,7 @@ namespace xgboost{
              * \brief initialize solver before training, called before training
              * this function is reserved for solver to allocate necessary space and do other preparation
              */
-            inline void InitTrainer(void){
+            virtual void InitTrainer(void){
                 if (tparam.nthread != 0){
                     omp_set_num_threads(tparam.nthread);
                 }
@@ -178,12 +178,14 @@ namespace xgboost{
              * \param root_index pre-partitioned root index of each instance,
              *          root_index.size() can be 0 which indicates that no pre-partition involved
              * \param bst_group which booster group it belongs to, by default, we only have 1 booster group, and leave this parameter as default
+             * \param buffer_offset buffer offset of prediction buffer of feats, if any, if it does not corresponds to a buffer position, give -1
              */
-            inline void DoBoost(std::vector<float> &grad,
-                                std::vector<float> &hess,
-                                const booster::FMatrixS &feats,
-                                const std::vector<unsigned> &root_index,
-                                int bst_group = 0 ) {
+            virtual void DoBoost(std::vector<float> &grad,
+                                 std::vector<float> &hess,
+                                 const booster::FMatrixS &feats,
+                                 const std::vector<unsigned> &root_index,
+                                 int bst_group = 0,
+                                 int buffer_offset = -1 ) {
                 booster::IBooster *bst = this->GetUpdateBooster( bst_group );
                 bst->DoBoost(grad, hess, feats, root_index);
             }
@@ -197,8 +199,8 @@ namespace xgboost{
              * \param bst_group booster group index 
              * \return prediction
              */
-            inline float Predict(const FMatrixS &feats, bst_uint row_index, 
-                                 int buffer_index = -1, unsigned root_index = 0, int bst_group = 0 ){
+            virtual float Predict(const FMatrixS &feats, bst_uint row_index, 
+                                  int buffer_index = -1, unsigned root_index = 0, int bst_group = 0 ){
                 size_t itop = 0;
                 float  psum = 0.0f;
                 const int bid = mparam.BufferOffset(buffer_index, bst_group);
@@ -344,8 +346,10 @@ namespace xgboost{
                  *        input instance could corresponds to
                  */
                 int num_booster_group;
+                /*! \brief extension flag used by extensions, set to 0 by default */
+                int num_extend_group;
                 /*! \brief reserved parameters */
-                int reserved[31];
+                int reserved[30];
                 /*! \brief constructor */
                 ModelParam(void){
                     num_boosters = 0;
@@ -354,6 +358,7 @@ namespace xgboost{
                     do_reboost = 0;
                     num_pbuffer = 0;
                     num_booster_group = 1;
+                    num_extend_group = 0;
                     memset(reserved, 0, sizeof(reserved));
                 }
                 /*!
@@ -372,6 +377,7 @@ namespace xgboost{
                     if (!strcmp("num_booster_group", name)) num_booster_group = atoi(val);
                     if (!strcmp("bst:num_roots", name))     num_roots = atoi(val);
                     if (!strcmp("bst:num_feature", name))   num_feature = atoi(val);
+                    if (!strcmp("num_extend_group", name))  num_extend_group = atoi(val);
                 }
                 inline int PredBufferSize(void) const{
                     if (num_booster_group == 0) return num_pbuffer;
@@ -395,7 +401,7 @@ namespace xgboost{
                 int reupdate_booster;
                 /*! \brief constructor */
                 TrainParam(void) {
-                    nthread = 1;
+                    nthread = 0;
                     reupdate_booster = -1;
                 }
                 /*!

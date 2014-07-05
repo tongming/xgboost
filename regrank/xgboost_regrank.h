@@ -12,7 +12,7 @@
 #include "xgboost_regrank_eval.h"
 #include "xgboost_regrank_obj.h"
 #include "../utils/xgboost_omp.h"
-#include "../booster/xgboost_gbmbase.h"
+#include "../booster/xgboost_gbm-inl.hpp"
 #include "../utils/xgboost_utils.h"
 #include "../utils/xgboost_stream.h"
 
@@ -187,7 +187,7 @@ namespace xgboost{
                 this->PredictRaw(preds_, train);
                 obj_->GetGradient(preds_, train.info, base_gbm.NumBoosters(), grad_, hess_);
                 if( grad_.size() == train.Size() ){
-                    base_gbm.DoBoost(grad_, hess_, train.data, train.info.root_index);
+                    base_gbm.DoBoost(grad_, hess_, train.data, train.info.root_index, 0, this->FindBufferOffset(train));
                 }else{
                     int ngroup = base_gbm.NumBoosterGroup();
                     utils::Assert( grad_.size() == train.Size() * (size_t)ngroup, "BUG: UpdateOneIter: mclass" );
@@ -195,7 +195,7 @@ namespace xgboost{
                     for( int g = 0; g < ngroup; ++ g ){
                         memcpy( &tgrad[0], &grad_[g*tgrad.size()], sizeof(float)*tgrad.size() );
                         memcpy( &thess[0], &hess_[g*tgrad.size()], sizeof(float)*tgrad.size() );
-                        base_gbm.DoBoost(tgrad, thess, train.data, train.info.root_index, g );
+                        base_gbm.DoBoost(tgrad, thess, train.data, train.info.root_index, g, this->FindBufferOffset(train));
                     }
                 }
             }
@@ -263,7 +263,7 @@ namespace xgboost{
 
                 obj_->GetGradient(preds_, train.info, base_gbm.NumBoosters(), grad_, hess_);
                 std::vector<unsigned> root_index;
-                base_gbm.DoBoost(grad_, hess_, train.data, root_index);
+                base_gbm.DoBoost(grad_, hess_, train.data, root_index, 0, this->FindBufferOffset(train));
 
                 for(size_t i = 0; i < cache_.size(); ++i){
                     this->InteractRePredict(*cache_[i].mat_);
@@ -397,7 +397,7 @@ namespace xgboost{
         protected:
             int silent;
             EvalSet evaluator_;
-            booster::GBMBase base_gbm;
+            booster::GBMPP base_gbm;
             ModelParam   mparam;           
             // objective fnction
             IObjFunction *obj_;
