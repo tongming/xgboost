@@ -179,7 +179,7 @@ namespace xgboost{
                     qset.push_back( entry[i].rindex );
                 }
                 std::sort( qset.begin(), qset.end() );
-                // do merge sort style, make the other set, remove elements in qset
+                // do merge sort style, make the other set, removex elements in qset
                 for( unsigned i = 0, top = 0; i < tsk.len; i ++ ){
                     if( top < qset.size() ){
                         if( tsk.idset[ i ] != qset[ top ] ){

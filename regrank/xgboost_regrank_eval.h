@@ -71,7 +71,7 @@ namespace xgboost{
                 return sum / wsum;
             }
             virtual const char *Name(void) const{
-                return "negllik";
+                return "logloss";
             }
         };
 
@@ -425,7 +425,7 @@ namespace xgboost{
                     if (!strcmp(name, evals_[i]->Name())) return;
                 }
                 IEvaluator *ev = Create( name );
-                if( name != NULL ) evals_.push_back( ev );   
+                if( ev != NULL ) evals_.push_back( ev );   
             }
             ~EvalSet(){
                 for (size_t i = 0; i < evals_.size(); ++i){

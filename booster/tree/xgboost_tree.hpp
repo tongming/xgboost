@@ -25,6 +25,7 @@ namespace xgboost{
 #include "xgboost_svdf_tree.hpp"
 #include "xgboost_col_treemaker.hpp"
 #include "xgboost_row_treemaker.hpp"
+#include "xgboost_col_treemaker-inl.hpp"
 
 namespace xgboost{
     namespace booster{
@@ -103,6 +104,11 @@ namespace xgboost{
                 }
                 case 2:{
                     RowTreeMaker<FMatrix> maker( tree, param, grad, hess, smat, root_index, constrain );
+                    maker.Make( tree.param.max_depth, num_pruned );
+                    break;
+                }
+                case 3:{
+                    ColTreeMakerX<FMatrix,CoreStats> maker( tree, param, grad, hess, smat, root_index, constrain );
                     maker.Make( tree.param.max_depth, num_pruned );
                     break;
                 }                    
