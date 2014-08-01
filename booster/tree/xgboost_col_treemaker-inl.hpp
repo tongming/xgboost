@@ -1,9 +1,10 @@
-#ifndef XGBOOST_COL_TREEMAKER_HPP
-#define XGBOOST_COL_TREEMAKER_HPP
+#ifndef XGBOOST_COL_TREEMAKER_INL_HPP
+#define XGBOOST_COL_TREEMAKER_INL_HPP
 /*!
- * \file xgboost_col_treemaker.hpp
+ * \file xgboost_col_treemaker-inl.hpp
  * \brief implementation of regression tree maker,
  *        use a column based approach, with OpenMP 
+ *        templating the statistics
  * \author Tianqi Chen: tianqi.tchen@gmail.com 
  */
 // use openmp
@@ -12,21 +13,21 @@
 #include "../../utils/xgboost_omp.h"
 #include "../../utils/xgboost_random.h"
 #include "../../utils/xgboost_fmap.h"
-#include "xgboost_base_treemaker.hpp"
+#include "xgboost_base_treemaker-inl.hpp"
 
 namespace xgboost{
     namespace booster{
-        template<typename FMatrix>
-        class ColTreeMaker : protected BaseTreeMaker{
+        template<typename FMatrix, typename TStats>
+        class ColTreeMakerX : protected BaseTreeMakerX{
         public:
-            ColTreeMaker( RegTree &tree,
-                          const TreeParamTrain &param, 
-                          const std::vector<float> &grad,
-                          const std::vector<float> &hess,
-                          const FMatrix &smat, 
-                          const std::vector<unsigned> &root_index, 
-                          const utils::FeatConstrain  &constrain )
-                : BaseTreeMaker( tree, param ), 
+            ColTreeMakerX( RegTree &tree,
+                           const TreeParamTrain &param, 
+                           const std::vector<float> &grad,
+                           const std::vector<float> &hess,
+                           const FMatrix &smat, 
+                           const std::vector<unsigned> &root_index, 
+                           const utils::FeatConstrain  &constrain )
+                : BaseTreeMakerX( tree, param ), 
                   grad(grad), hess(hess), 
                   smat(smat), root_index(root_index), constrain(constrain) {
                 utils::Assert( grad.size() == hess.size(), "booster:invalid input" );
@@ -58,10 +59,8 @@ namespace xgboost{
         private:
             /*! \brief per thread x per node entry to store tmp data */
             struct ThreadEntry{
-                /*! \brief sum gradient statistics */
-                double sum_grad;
-                /*! \brief sum hessian statistics */
-                double sum_hess;
+                /*! \brief statistics of data*/
+                TStats stats;
                 /*! \brief last feature value scanned */
                 float  last_fvalue;
                 /*! \brief current best solution */
@@ -72,7 +71,37 @@ namespace xgboost{
                 }
                 /*! \brief clear statistics */
                 inline void ClearStats( void ){
-                    sum_grad = sum_hess = 0.0;
+                    stats.Clear();
+                }
+            };
+        private:
+            // try to prune off current leaf, return true if successful
+            inline void TryPruneLeaf( int nid, int depth ){
+                if( tree[ nid ].is_root() ) return;
+                int pid = tree[ nid ].parent();
+                RegTree::NodeStat &s = tree.stat( pid );
+                ++ s.leaf_child_cnt;
+                
+                if( s.leaf_child_cnt >= 2 && param.need_prune( s.loss_chg, depth - 1 ) ){
+                    this->stat_num_pruned += 2;
+                    // need to be pruned
+                    tree.ChangeToLeaf( pid, param.learning_rate * s.base_weight );
+                    // tail recursion
+                    this->TryPruneLeaf( pid, depth - 1 );
+                }
+            }
+            struct NodeEntry{
+                /*! \brief statics for node entry */
+                TStats stats;
+                /*! \brief loss of this node, without split */
+                float  root_gain;
+                /*! \brief weight calculated related to current data */
+                float  weight;
+                /*! \brief current best solution */
+                SplitEntry best;
+                NodeEntry( void ){
+                    stats.Clear();
+                    weight = root_gain = 0.0f;
                 }
             };
         private:
@@ -91,26 +120,23 @@ namespace xgboost{
                 for( unsigned i = 0; i < ndata; ++ i ){
                     const int tid = omp_get_thread_num();
                     if( position[i] < 0 ) continue; 
-                    stemp[tid][ position[i] ].sum_grad += grad[i];
-                    stemp[tid][ position[i] ].sum_hess += hess[i];
+                    stemp[tid][ position[i] ].stats.Add( grad[i], hess[i] );
                 }
 
                 for( size_t j = 0; j < qexpand.size(); ++ j ){
                     const int nid = qexpand[ j ];
-                    double sum_grad = 0.0, sum_hess = 0.0;
+                    TStats stats; stats.Clear();
                     for( size_t tid = 0; tid < stemp.size(); tid ++ ){
-                        sum_grad += stemp[tid][nid].sum_grad;
-                        sum_hess += stemp[tid][nid].sum_hess;
+                        stats.Add( stemp[tid][nid].stats );
                     }
                     // update node statistics
-                    snode[nid].sum_grad = sum_grad; 
-                    snode[nid].sum_hess = sum_hess;
-                    snode[nid].root_gain = param.CalcRootGain( sum_grad, sum_hess );
+                    snode[nid].stats = stats;
+                    snode[nid].root_gain = param.CalcRootGain( stats );
                     if( !tree[nid].is_root() ){
-                        snode[nid].weight = param.CalcWeight( sum_grad, sum_hess, tree.stat( tree[nid].parent() ).base_weight );
+                        snode[nid].weight = param.CalcWeight( stats, tree.stat( tree[nid].parent() ).base_weight );
                         tree.stat(nid).base_weight = snode[nid].weight;
                     }else{
-                        snode[nid].weight = param.CalcWeight( sum_grad, sum_hess, 0.0f );
+                        snode[nid].weight = param.CalcWeight( stats, 0.0f );
                         tree.stat(nid).base_weight = snode[nid].weight;
                     }
                 }
@@ -133,40 +159,36 @@ namespace xgboost{
                     ThreadEntry &e = temp[ nid ];
 
                     // test if first hit, this is fine, because we set 0 during init
-                    if( e.sum_hess == 0.0 ){
-                        e.sum_grad = grad[ ridx ];
-                        e.sum_hess = hess[ ridx ];
+                    if( e.stats.Empty() ){
+                        e.stats.Add( grad[ridx], hess[ridx] );
                         e.last_fvalue = fvalue;
                     }else{
                         // try to find a split
-                        if( fabsf(fvalue - e.last_fvalue) > rt_2eps && e.sum_hess >= param.min_child_weight ){
-                            const double csum_hess = snode[ nid ].sum_hess - e.sum_hess;
-                            if( csum_hess >= param.min_child_weight ){
-                                const double csum_grad = snode[nid].sum_grad - e.sum_grad; 
+                        if( fabsf(fvalue - e.last_fvalue) > rt_2eps && e.stats.sum_hess >= param.min_child_weight ){
+                            TStats c = snode[nid].stats.Substract( e.stats );
+                            if( c.sum_hess >= param.min_child_weight ){
                                 const double loss_chg = 
-                                    + param.CalcGain( e.sum_grad, e.sum_hess, snode[nid].weight ) 
-                                    + param.CalcGain( csum_grad , csum_hess , snode[nid].weight )
+                                    + param.CalcGain( e.stats, snode[nid].weight ) 
+                                    + param.CalcGain( c, snode[nid].weight )
                                     - snode[nid].root_gain;
                                 e.best.Update( loss_chg, fid, (fvalue + e.last_fvalue) * 0.5f, !is_forward_search );
                             }
                         }
                         // update the statistics
-                        e.sum_grad += grad[ ridx ];
-                        e.sum_hess += hess[ ridx ];
+                        e.stats.Add( grad[ridx], hess[ridx] );
                         e.last_fvalue = fvalue;
                     }
                 }
                 // finish updating all statistics, check if it is possible to include all sum statistics
                 for( size_t i = 0; i < qexpand.size(); ++ i ){
                     const int nid = qexpand[ i ];
-                    ThreadEntry &e = temp[ nid ];
-                    const double csum_hess = snode[nid].sum_hess - e.sum_hess;
+                    ThreadEntry &e = temp[ nid ];  
+                    TStats c = snode[nid].stats.Substract( e.stats );                  
 
-                    if( e.sum_hess >= param.min_child_weight && csum_hess >= param.min_child_weight ){
-                        const double csum_grad = snode[nid].sum_grad - e.sum_grad; 
+                    if( e.stats.sum_hess >= param.min_child_weight && c.sum_hess >= param.min_child_weight ){
                         const double loss_chg = 
-                            + param.CalcGain( e.sum_grad, e.sum_hess, snode[nid].weight ) 
-                            + param.CalcGain(  csum_grad,  csum_hess, snode[nid].weight )
+                            + param.CalcGain( e.stats, snode[nid].weight ) 
+                            + param.CalcGain( c, snode[nid].weight )
                             - snode[nid].root_gain;
                         const float delta = is_forward_search ? rt_eps:-rt_eps;
                         e.best.Update( loss_chg, fid, e.last_fvalue + delta, !is_forward_search );
@@ -326,6 +348,21 @@ namespace xgboost{
                     }
                 }
             }
+        protected:
+            /*! \brief do prunning of a tree */
+            inline int DoPrune( void ){
+                this->stat_num_pruned = 0;
+                // initialize auxiliary statistics
+                for( int nid = 0; nid < tree.param.num_nodes; ++ nid ){
+                    tree.stat( nid ).leaf_child_cnt = 0;
+                    tree.stat( nid ).loss_chg = snode[ nid ].best.loss_chg;
+                    tree.stat( nid ).sum_hess = static_cast<float>( snode[ nid ].stats.sum_hess );
+                }
+                for( int nid = 0; nid < tree.param.num_nodes; ++ nid ){
+                    if( tree[ nid ].is_leaf() ) this->TryPruneLeaf( nid, tree.GetDepth(nid) );
+                }
+                return this->stat_num_pruned;
+            }
         private:
             // number of omp thread used during training
             int nthread;
@@ -335,6 +372,8 @@ namespace xgboost{
             std::vector<int> position;
             // PerThread x PerTreeNode: statistics for per thread construction
             std::vector< std::vector<ThreadEntry> > stemp;
+            /*! \brief TreeNode Data: statistics for each constructed node, the derived class must maintain this */
+            std::vector<NodeEntry> snode;
         private:
             const std::vector<float> &grad;
             const std::vector<float> &hess;

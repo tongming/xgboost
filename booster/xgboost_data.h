@@ -8,6 +8,7 @@
  */
 
 #include <vector>
+#include <limits>
 #include <climits>
 #include "../utils/xgboost_utils.h"
 #include "../utils/xgboost_stream.h"
@@ -105,16 +106,23 @@ namespace xgboost{
             inline bool HaveColAccess(void) const;
             /*!
              * \brief get column iterator, the columns must be sorted by feature value
-             * \param ridx column index
+             * \param cidx column index
              * \return column iterator
              */
-            inline ColIter GetSortedCol(size_t ridx) const;
+            inline ColIter GetSortedCol(size_t cidx) const;
             /*!
              * \brief get column backward iterator, starts from biggest fvalue, and iterator back
-             * \param ridx column index
+             * \param cidx column index
              * \return reverse column iterator
              */
-            inline ColBackIter GetReverseSortedCol(size_t ridx) const;
+            inline ColBackIter GetReverseSortedCol(size_t cidx) const;
+            /**
+             * \breif return #entries-in-col / #rows
+             * \param cidx column index 
+             *   this function is used to help speedup, 
+             *   doese not necessarily implement it if not sure, return 0.0;
+             */
+            inline bool GetColDensity(size_t cidx) const;
         };
     };
 };
@@ -270,11 +278,18 @@ namespace xgboost{
                 utils::Assert(!bst_debug || cidx < this->NumCol(), "col id exceed bound");
                 return ColBackIter(&col_data_[col_ptr_[cidx + 1]], &col_data_[col_ptr_[cidx]]);
             }
+            /*!  \brief get column density */            
+            inline float GetColDensity(size_t cidx) const{
+                size_t nrow = NumRow();
+                size_t nmiss = nrow - (col_ptr_[cidx+1] - col_ptr_[cidx]);
+                return 1.0f - ((float)nmiss)/nrow;
+            }
             /*!
              * \brief intialize the data so that we have both column and row major
              *        access, call this whenever we need column access
              */
             inline void InitData(void){
+                utils::Assert( this->NumRow() < std::numeric_limits<bst_uint>::max(), "UINT_MAX is the maximum number of instance supported by xgboost so far, change definition of bst_uint to 64 bit integer");
                 utils::SparseCSRMBuilder<REntry> builder(col_ptr_, col_data_);
                 builder.InitBudget(0);
                 for (size_t i = 0; i < this->NumRow(); i++){

@@ -264,7 +264,8 @@ extern "C"{
             mats.push_back( static_cast<DMatrix*>(dmats[i]) );
             names.push_back( std::string( evnames[i]) );
         }
-        bst->EvalOneIter( iter, mats, names, stderr );
+        std::string res = bst->EvalOneIter( iter, mats, names );
+        fprintf( stderr, "%s\n", res.c_str() );
     }
     const float *XGBoosterPredict( void *handle, void *dmat, size_t *len, int bst_group ){
         return static_cast<Booster*>(handle)->Pred( *static_cast<DMatrix*>(dmat), len, bst_group );
@@ -282,7 +283,11 @@ extern "C"{
         if( strlen(fmap) != 0 ){ 
             featmap.LoadText( fmap );
         }
-        static_cast<Booster*>(handle)->DumpModel( fo, featmap, false );
+        std::vector<std::string> dump = static_cast<Booster*>(handle)->DumpModel( featmap, false );
+        for( size_t i = 0; i < dump.size(); ++ i ){
+            fprintf(fo,"booster[%lu]:\n", i);
+            fprintf(fo,"%s", dump[i].c_str() ); 
+        }
         fclose( fo );
     }
 

@@ -163,8 +163,9 @@ namespace xgboost{
                 for (int i = 0; i < num_round; ++i){
                     elapsed = (unsigned long)(time(NULL) - start);
                     if (!silent) printf("boosting round %d, %lu sec elapsed\n", i, elapsed);
-                    learner.UpdateOneIter(data);                    
-                    learner.EvalOneIter(i, devalall, eval_data_names);
+                    learner.UpdateOneIter(data); 
+                    std::string res = learner.EvalOneIter(i, devalall, eval_data_names);
+                    fprintf( stderr, "%s\n", res.c_str() );
                     if (save_period != 0 && (i + 1) % save_period == 0){
                         this->SaveModel(i);
                     }
@@ -216,7 +217,11 @@ namespace xgboost{
 
             inline void TaskDump(void){
                 FILE *fo = utils::FopenCheck(name_dump.c_str(), "w");
-                learner.DumpModel(fo, fmap, dump_model_stats != 0);
+                std::vector<std::string> dump = learner.DumpModel(fmap, dump_model_stats != 0);
+                for( size_t i = 0; i < dump.size(); ++ i ){
+                    fprintf(fo,"booster[%lu]:\n", i);
+                    fprintf(fo,"%s", dump[i].c_str() ); 
+                }
                 fclose(fo);
             }
             inline void TaskDumpPath(void){

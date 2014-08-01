@@ -122,7 +122,10 @@ namespace xgboost{
            if( !strcmp("multi:softmax", name ) )   return new SoftmaxMultiClassObj(0);
            if( !strcmp("multi:softprob", name ) )   return new SoftmaxMultiClassObj(1);
            if( !strcmp("rank:pairwise", name ) ) return new PairwiseRankObj();
+           if( !strcmp("rank:ndcg", name ) ) return new LambdaRankObj_NDCG();
+		   if( !strcmp("rank:map", name ) ) return new LambdaRankObj_MAP();
            if( !strcmp("rank:softmax", name ) )  return new SoftmaxRankObj();
+           if( !strcmp("rank:wsoftmax", name ) )  return new SoftmaxWeightRankObj();
            utils::Error("unknown objective function type");
            return NULL;
        }

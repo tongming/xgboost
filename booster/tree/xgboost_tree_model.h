@@ -7,6 +7,9 @@
  * \author Tianqi Chen: tianqi.tchen@gmail.com
  */
 #include <cstring>
+// construct using sstream
+#include <sstream>
+#include "xgboost_tree_param.h"
 #include "../../utils/xgboost_utils.h"
 #include "../../utils/xgboost_stream.h"
 
@@ -49,7 +52,7 @@ namespace xgboost{
                  * \param name name of the parameter
                  * \param val  value of the parameter
                  */
-                inline void SetParam( const char *name, const char *val ){
+                inline void SetParam( const char *name, const char *val ){                    
                     if( !strcmp("num_roots", name ) )    num_roots = atoi( val );
                     if( !strcmp("num_feature", name ) )  num_feature = atoi( val );
                 }
@@ -326,206 +329,72 @@ namespace xgboost{
                 return param.num_nodes - param.num_roots - param.num_deleted;
             }
             /*! \brief dump model to text file  */
-            inline void DumpModel( FILE *fo, const utils::FeatMap& fmap, bool with_stats ){
-                this->Dump( 0, fo, fmap, 0, with_stats );
+            inline std::string DumpModel( const utils::FeatMap& fmap, bool with_stats ){
+                std::stringstream fo("");
+                for( int i = 0; i < param.num_roots; ++ i ){  
+                    this->Dump( i, fo, fmap, 0, with_stats );
+                }
+                return fo.str();
             }
         private:
-            void Dump( int nid, FILE *fo, const utils::FeatMap& fmap, int depth, bool with_stats ){
+            void Dump( int nid, std::stringstream &fo, const utils::FeatMap& fmap, int depth, bool with_stats ){
                 for( int  i = 0;  i < depth; ++ i ){
-                    fprintf( fo, "\t" );
+                    fo << '\t';
                 }
                 if( nodes[ nid ].is_leaf() ){
-                    fprintf( fo, "%d:leaf=%f ", nid, nodes[ nid ].leaf_value() );
+                    fo << nid << ":leaf=" << nodes[ nid ].leaf_value();
                     if( with_stats ){
                         stat( nid ).Print( fo, true );
                     }
-                    fprintf( fo, "\n" );
+                    fo << '\n';
                 }else{
                     // right then left,
                     TSplitCond cond = nodes[ nid ].split_cond();
                     const unsigned split_index = nodes[ nid ].split_index();
-
                     if( split_index < fmap.size() ){
                         switch( fmap.type(split_index) ){
                         case utils::FeatMap::kIndicator:{
                             int nyes = nodes[ nid ].default_left()?nodes[nid].cright():nodes[nid].cleft();
-                            fprintf( fo, "%d:[%s] yes=%d,no=%d", 
-                                     nid, fmap.name( split_index ),
-                                     nyes, nodes[nid].cdefault() );
+                            fo << nid << ":[" << fmap.name( split_index ) << "] yes=" << nyes << ",no=" 
+                               << nodes[nid].cdefault();
                             break;                            
                         }
                         case utils::FeatMap::kInteger:{
-                            fprintf( fo, "%d:[%s<%d] yes=%d,no=%d,missing=%d", 
-                                     nid, fmap.name(split_index), int( float(cond)+1.0f), 
-                                     nodes[ nid ].cleft(), nodes[ nid ].cright(),
-                                     nodes[ nid ].cdefault() );
+                            fo << nid << ":[" << fmap.name( split_index ) << "<"<< int(float(cond)+1.0f) 
+                               << "] yes=" << nodes[nid].cleft() 
+                               << ",no=" << nodes[nid].cright()
+                               << ",missing=" << nodes[ nid ].cdefault();
                             break;
                         }
                         case utils::FeatMap::kFloat:
                         case utils::FeatMap::kQuantitive:{
-                            fprintf( fo, "%d:[%s<%f] yes=%d,no=%d,missing=%d", 
-                                     nid, fmap.name(split_index), float(cond), 
-                                     nodes[ nid ].cleft(), nodes[ nid ].cright(),
-                                     nodes[ nid ].cdefault() );
+                            fo << nid << ":[" << fmap.name( split_index ) << "<"<< float(cond)
+                               << "] yes=" << nodes[nid].cleft() 
+                               << ",no=" << nodes[nid].cright()
+                               << ",missing=" << nodes[ nid ].cdefault();
                             break;
                         }
                         default: utils::Error("unknown fmap type");
                         }
                     }else{
-                        fprintf( fo, "%d:[f%u<%f] yes=%d,no=%d,missing=%d", 
-                                 nid, split_index, float(cond), 
-                                 nodes[ nid ].cleft(), nodes[ nid ].cright(),
-                                 nodes[ nid ].cdefault() );
+                      fo << nid << ":[f" << split_index << "<"<< float(cond)
+                         << "] yes=" << nodes[nid].cleft() 
+                         << ",no=" << nodes[nid].cright()
+                         << ",missing=" << nodes[ nid ].cdefault();              
                     }
+                    
                     if( with_stats ){
-                        fprintf( fo, " ");
+                        fo << ' '; 
                         stat( nid ).Print( fo, false );
                     }
-                    fprintf( fo, "\n" );
+                    fo << '\n';
                     this->Dump( nodes[ nid ].cleft(), fo, fmap, depth+1, with_stats );
                     this->Dump( nodes[ nid ].cright(), fo, fmap, depth+1, with_stats );
                 }                
             } 
         };
     };
-    
-    namespace booster{
-        /*! \brief training parameters for regression tree */
-        struct TreeParamTrain{
-            // learning step size for a time
-            float learning_rate;
-            // minimum loss change required for a split
-            float min_split_loss;
-            // maximum depth of a tree
-            int   max_depth;
-            //----- the rest parameters are less important ----
-            // minimum amount of hessian(weight) allowed in a child
-            float min_child_weight;
-            // weight decay parameter used to control leaf fitting
-            float reg_lambda;
-            // reg method
-            int   reg_method;
-            // default direction choice
-            int   default_direction;
-            // whether we want to do subsample
-            float subsample;
-            // whether to use layerwise aware regularization
-            int   use_layerwise;
-            // number of threads to be used for tree construction, if OpenMP is enabled, if equals 0, use system default
-            int nthread;
-            /*! \brief constructor */
-            TreeParamTrain( void ){
-                learning_rate = 0.3f;
-                min_child_weight = 1.0f;
-                max_depth = 6;
-                reg_lambda = 1.0f;
-                reg_method = 2;
-                default_direction = 0;
-                subsample = 1.0f;
-                use_layerwise = 0;
-                nthread = 0;
-            }
-            /*! 
-             * \brief set parameters from outside 
-             * \param name name of the parameter
-             * \param val  value of the parameter
-             */            
-            inline void SetParam( const char *name, const char *val ){
-                // sync-names 
-                if( !strcmp( name, "gamma") )  min_split_loss = (float)atof( val );
-                if( !strcmp( name, "eta") )    learning_rate  = (float)atof( val );
-                if( !strcmp( name, "lambda") ) reg_lambda = (float)atof( val );
-                // normal tree prameters
-                if( !strcmp( name, "learning_rate") )     learning_rate = (float)atof( val );
-                if( !strcmp( name, "min_child_weight") )  min_child_weight = (float)atof( val );
-                if( !strcmp( name, "min_split_loss") )    min_split_loss = (float)atof( val );
-                if( !strcmp( name, "max_depth") )         max_depth = atoi( val );           
-                if( !strcmp( name, "reg_lambda") )        reg_lambda = (float)atof( val );
-                if( !strcmp( name, "reg_method") )        reg_method = (float)atof( val );
-                if( !strcmp( name, "subsample") )         subsample  = (float)atof( val );
-                if( !strcmp( name, "use_layerwise") )     use_layerwise = atoi( val );
-                if( !strcmp( name, "nthread") )           nthread = atoi( val );
-                if( !strcmp( name, "default_direction") ) {
-                    if( !strcmp( val, "learn") )  default_direction = 0;
-                    if( !strcmp( val, "left") )   default_direction = 1;
-                    if( !strcmp( val, "right") )  default_direction = 2;
-                }
-            }
-        protected:
-            // functions for L1 cost
-            static inline double ThresholdL1( double w, double lambda ){
-                if( w > +lambda ) return w - lambda;
-                if( w < -lambda ) return w + lambda;
-                return 0.0;
-            }
-            inline double CalcWeight( double sum_grad, double sum_hess )const{
-                if( sum_hess < min_child_weight ){
-                    return 0.0;
-                }else{
-                    switch( reg_method ){
-                    case 1: return - ThresholdL1( sum_grad, reg_lambda ) / sum_hess;
-                    case 2: return - sum_grad / ( sum_hess + reg_lambda );
-                        // elstic net
-                    case 3: return - ThresholdL1( sum_grad, 0.5 * reg_lambda ) / ( sum_hess + 0.5 * reg_lambda );
-                    default: return - sum_grad / sum_hess;
-                    }
-                }
-            }
-        private:
-            inline static double Sqr( double a ){
-                return a * a;
-            }
-        public:
-            // calculate the cost of loss function
-            inline double CalcGain( double sum_grad, double sum_hess ) const{
-                if( sum_hess < min_child_weight ){
-                    return 0.0;
-                }
-                switch( reg_method ){
-                case 1 : return Sqr( ThresholdL1( sum_grad, reg_lambda ) ) / sum_hess;
-                case 2 : return Sqr( sum_grad ) / ( sum_hess + reg_lambda );
-                    // elstic net
-                case 3 : return Sqr( ThresholdL1( sum_grad, 0.5 * reg_lambda ) ) / ( sum_hess + 0.5 * reg_lambda );
-                default: return Sqr( sum_grad ) / sum_hess;
-                }        
-            }
-            // KEY:layerwise
-            // calculate cost of root
-            inline double CalcRootGain( double sum_grad, double sum_hess ) const{
-                if( use_layerwise == 0 ) return this->CalcGain( sum_grad, sum_hess );
-                else return 0.0;
-            }
-            // KEY:layerwise
-            // calculate the cost after split
-            // base_weight: the base_weight of parent           
-            inline double CalcGain( double sum_grad, double sum_hess, double base_weight ) const{
-                if( use_layerwise == 0 ) return this->CalcGain( sum_grad, sum_hess );
-                else return this->CalcGain( sum_grad + sum_hess * base_weight, sum_hess );
-            }
-            // calculate the weight of leaf
-            inline double CalcWeight( double sum_grad, double sum_hess, double parent_base_weight )const{
-                if( use_layerwise == 0 ) return CalcWeight( sum_grad, sum_hess );
-                else return parent_base_weight + CalcWeight( sum_grad + parent_base_weight * sum_hess, sum_hess );
-            }           
-            /*! \brief whether need forward small to big search: default right */
-            inline bool need_forward_search( void ) const{
-                return this->default_direction != 1;
-            }
-            /*! \brief whether need forward big to small search: default left */
-            inline bool need_backward_search( void ) const{
-                return this->default_direction != 2;
-            }
-            /*! \brief given the loss change, whether we need to invode prunning */
-            inline bool need_prune( double loss_chg, int depth ) const{
-                return loss_chg < this->min_split_loss;
-            }
-            /*! \brief whether we can split with current hessian */
-            inline bool cannot_split( double sum_hess, int depth ) const{
-                return sum_hess < this->min_child_weight * 2.0; 
-            }
-        };
-    };
-    
+       
     namespace booster{
         /*! \brief node statistics used in regression tree */
         struct RTreeNodeStat{
@@ -538,11 +407,11 @@ namespace xgboost{
             /*! \brief number of child that is leaf node known up to now */
             int   leaf_child_cnt;
             /*! \brief print information of current stats to fo */
-            inline void Print( FILE *fo, bool is_leaf ) const{
+            inline void Print( std::stringstream &fo, bool is_leaf ) const{
                 if( !is_leaf ){
-                    fprintf( fo, "gain=%f,cover=%f", loss_chg, sum_hess );
+                    fo << "gain=" << loss_chg << ",cover=" << sum_hess;
                 }else{
-                    fprintf( fo, "cover=%f", sum_hess );
+                    fo << "cover=" << sum_hess;
                 }
             }
         };

@@ -162,7 +162,7 @@ namespace xgboost{
                 
                 utils::FileStream fs(utils::FopenCheck(fname, "wb"));
                 data.SaveBinary(fs);
-                utils::Assert( info.labels.size() == data.NumRow(), "label size is not consistent with feature matrix size" );
+                utils::Assert( info.labels.size() == data.NumRow(), "label size is not consistent with feature matrix size" );                
                 fs.Write(&info.labels[0], sizeof(float) * data.NumRow());
                 {// write out group ptr
                     unsigned ngptr = static_cast<unsigned>( info.group_ptr.size() );

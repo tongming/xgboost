@@ -1,0 +1,13 @@
+Instructions:
+The dataset for ranking demo is from MSLR-WEB30K Fold1, http://research.microsoft.com/en-us/projects/mslr/download.aspx 
+You can use the following command to run the example
+
+
+Get the data: ./wgetdata.sh
+Run the example: ./runexp.sh
+
+
+
+
+
+

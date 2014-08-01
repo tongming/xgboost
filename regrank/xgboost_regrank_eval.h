@@ -71,7 +71,7 @@ namespace xgboost{
                 return sum / wsum;
             }
             virtual const char *Name(void) const{
-                return "negllik";
+                return "logloss";
             }
         };
 
@@ -227,6 +227,51 @@ namespace xgboost{
             }
         };
 
+
+        /*! \brief precision with cut off at top percentile */
+        struct EvalPrecisionRatio : public IEvaluator{
+        public:
+            EvalPrecisionRatio( const char *name ):name_(name){
+                utils::Assert( sscanf( name, "pratio@%f", &ratio_) == 1, "BUG" );
+            }
+            virtual float Eval(const std::vector<float> &preds,
+                               const DMatrix::Info &info) const {
+                utils::Assert( preds.size() == info.labels.size(), "label size predict size not match" );
+                std::vector< std::pair<float, unsigned> > rec;
+                for (size_t j = 0; j < preds.size(); ++j){
+                    rec.push_back(std::make_pair(preds[j], j));
+                }
+                std::sort(rec.begin(), rec.end(), CmpFirst);
+                double pratio = CalcPRatio( rec, info );
+                return static_cast<float>(pratio);
+            }
+            virtual const char *Name(void) const{
+                return name_.c_str();
+            }
+        protected:
+            inline double CalcPRatio( const std::vector< std::pair<float,unsigned> >& rec, const DMatrix::Info &info ) const{
+                double wt_sum = 0.0, wt_pos = 0.0;
+                for (size_t j = 0; j < info.labels.size(); ++j){
+                    const float w = info.GetWeight(j);
+                    wt_sum += w;
+                    wt_pos += info.labels[j] * w ;
+                }
+                double wt_ratio = wt_sum * ratio_;
+                double wt_hit = 0.0, wt_tcum = 0.0;
+                for (size_t j = 0; j < rec.size(); ++j){
+                    const float wt = info.GetWeight(rec[j].second);
+                    const float ctr = info.labels[rec[j].second];                    
+                    if( wt_tcum >= wt_ratio ) break;
+                    wt_tcum += wt;
+                    wt_hit += ctr * wt;
+                }
+                return wt_hit / wt_pos;
+            }
+        protected:
+            float ratio_;
+            std::string name_;
+        };
+
         /*! \brief Evaluate rank list */          
         struct EvalRankList : public IEvaluator{
         public:
@@ -249,7 +294,7 @@ namespace xgboost{
                         for (unsigned j = gptr[k]; j < gptr[k + 1]; ++j){
                             rec.push_back(std::make_pair(preds[j], (int)info.labels[j]));
                         }
-                        sum_metric += this->EvalMetric( rec );                        
+                        sum_metric += this->EvalMetric( rec );
                     }
                 }
                 return static_cast<float>(sum_metric) / ngroup;
@@ -260,15 +305,22 @@ namespace xgboost{
         protected:
             EvalRankList(const char *name){
                 name_ = name;
-                if( sscanf(name, "%*[^@]@%u", &topn_) != 1 ){
+                minus_ = false;
+                if( sscanf(name, "%*[^@]@%u[-]?", &topn_) != 1 ){
                     topn_ = UINT_MAX;
                 }
+                
+                if(name[strlen(name)-1]=='-'){
+                    minus_ = true;
+                }
+                
             }
             /*! \return evaluation metric, given the pair_sort record, (pred,label) */
             virtual float EvalMetric( std::vector< std::pair<float, unsigned> > &pair_sort ) const = 0;
         protected:
             unsigned topn_;
             std::string name_;
+            bool minus_;
         };
         
         /*! \brief Precison at N, for both classification and rank */
@@ -298,18 +350,24 @@ namespace xgboost{
                 for( size_t i = 0; i < rec.size() && i < this->topn_; i ++ ){
                     const unsigned rel = rec[i].second;
                     if( rel != 0 ){ 
-                        sumdcg += logf(2.0f) * ((1<<rel)-1) / logf( i + 2 );
+                        sumdcg += (( 1 << rel) - 1) / logf( i + 2 );
                     }
                 }
                 return static_cast<float>(sumdcg);
             }
             virtual float EvalMetric( std::vector< std::pair<float, unsigned> > &rec ) const {
-                std::sort(rec.begin(), rec.end(), CmpSecond);
-                float idcg = this->CalcDCG(rec);
-                std::sort(rec.begin(), rec.end(), CmpFirst);
+                std::stable_sort (rec.begin(), rec.end(), CmpFirst);
                 float dcg = this->CalcDCG(rec);
-                if( idcg == 0.0f ) return 0.0f;
-                else return dcg/idcg;
+                std::stable_sort (rec.begin(), rec.end(), CmpSecond);
+                float idcg = this->CalcDCG(rec);
+                if( idcg == 0.0f ) {
+                    if(minus_){
+                        return 0.0f;
+                    }else {
+                        return 1.0f;
+                    }
+                }
+		return dcg/idcg;
             }
         };
 
@@ -330,8 +388,16 @@ namespace xgboost{
                         }
                     }
                 }
-                if (nhits != 0) sumap /= nhits;
-                return static_cast<float>(sumap);                
+                if (nhits != 0) {
+                    sumap /= nhits;
+                    return static_cast<float>(sumap);
+                } else {
+                    if(minus_) {
+                        return 0.0f;
+                    }else{
+                        return 1.0f;
+                    }
+                }               
             }
         };
     };
@@ -340,33 +406,44 @@ namespace xgboost{
         /*! \brief a set of evaluators */
         struct EvalSet{
         public:
+            inline static IEvaluator *Create(const char *name){
+                if (!strcmp(name, "rmse"))    return new EvalRMSE();
+                if (!strcmp(name, "error"))   return new EvalError();
+                if (!strcmp(name, "merror"))   return new EvalMatchError();
+                if (!strcmp(name, "logloss")) return new EvalLogLoss();
+                if (!strcmp(name, "auc"))    return new EvalAuc();
+                if (!strncmp(name, "ams@",4))  return new EvalAMS(name);
+                if (!strncmp(name, "pre@", 4)) return new EvalPrecision(name);
+                if (!strncmp(name, "pratio@", 7)) return new EvalPrecisionRatio(name);
+                if (!strncmp(name, "map", 3))   return new EvalMAP(name);
+                if (!strncmp(name, "ndcg", 3))  return new EvalNDCG(name);
+                return NULL;
+            }
+        public:
             inline void AddEval(const char *name){
                 for (size_t i = 0; i < evals_.size(); ++i){
                     if (!strcmp(name, evals_[i]->Name())) return;
                 }
-                if (!strcmp(name, "rmse"))    evals_.push_back(new EvalRMSE());
-                if (!strcmp(name, "error"))   evals_.push_back(new EvalError());
-                if (!strcmp(name, "merror"))   evals_.push_back(new EvalMatchError());
-                if (!strcmp(name, "logloss")) evals_.push_back(new EvalLogLoss());
-                if (!strcmp(name, "auc"))    evals_.push_back(new EvalAuc());
-                if (!strncmp(name, "ams@",4))  evals_.push_back(new EvalAMS(name));
-                if (!strncmp(name, "pre@", 4)) evals_.push_back(new EvalPrecision(name));
-                if (!strncmp(name, "map", 3))   evals_.push_back(new EvalMAP(name));
-                if (!strncmp(name, "ndcg", 3))  evals_.push_back(new EvalNDCG(name));
+                IEvaluator *ev = Create( name );
+                if( ev != NULL ) evals_.push_back( ev );   
             }
             ~EvalSet(){
                 for (size_t i = 0; i < evals_.size(); ++i){
                     delete evals_[i];
                 }
             }
-            inline void Eval(FILE *fo, const char *evname,
-                const std::vector<float> &preds,
-                const DMatrix::Info &info) const{
-                for (size_t i = 0; i < evals_.size(); ++i){
-                    float res = evals_[i]->Eval(preds, info);
-                    fprintf(fo, "\t%s-%s:%f", evname, evals_[i]->Name(), res);
-                }
-            }
+            inline std::string Eval(const char *evname,
+                                    const std::vector<float> &preds,
+                                    const DMatrix::Info &info) const{
+              std::string result = "";
+              for (size_t i = 0; i < evals_.size(); ++i){
+                  float res = evals_[i]->Eval(preds, info);
+                  char tmp[1024];
+                  sprintf(tmp, "\t%s-%s:%f", evname, evals_[i]->Name(), res);
+                  result += tmp;
+              }
+              return result;
+          }
         private:
             std::vector<const IEvaluator*> evals_;
         };

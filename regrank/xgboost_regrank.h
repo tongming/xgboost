@@ -12,7 +12,7 @@
 #include "xgboost_regrank_eval.h"
 #include "xgboost_regrank_obj.h"
 #include "../utils/xgboost_omp.h"
-#include "../booster/xgboost_gbmbase.h"
+#include "../booster/xgboost_gbm-inl.hpp"
 #include "../utils/xgboost_utils.h"
 #include "../utils/xgboost_stream.h"
 
@@ -138,15 +138,23 @@ namespace xgboost{
             inline void LoadModel(utils::IStream &fi){
                 base_gbm.LoadModel(fi);
                 utils::Assert(fi.Read(&mparam, sizeof(ModelParam)) != 0);
+                // save name obj
+                size_t len;                
+                if( fi.Read(&len, sizeof(len)) != 0 ){
+                    name_obj_.resize( len );
+                    if( len != 0 ){
+                        utils::Assert( fi.Read(&name_obj_[0], len*sizeof(char)) != 0 );
+                    }
+                }
             }
             /*!
              * \brief DumpModel
-             * \param fo text file
              * \param fmap feature map that may help give interpretations of feature
              * \param with_stats whether print statistics as well
+             * \return a vector of dump for each of the tree
              */
-            inline void DumpModel(FILE *fo, const utils::FeatMap& fmap, bool with_stats){
-                base_gbm.DumpModel(fo, fmap, with_stats);
+            inline std::vector<std::string> DumpModel(const utils::FeatMap& fmap, bool with_stats){
+                return base_gbm.DumpModel(fmap, with_stats);
             }
             /*!
              * \brief Dump path of all trees
@@ -163,6 +171,10 @@ namespace xgboost{
             inline void SaveModel(utils::IStream &fo) const{
                 base_gbm.SaveModel(fo);
                 fo.Write(&mparam, sizeof(ModelParam));
+                // save name obj
+                size_t len = name_obj_.length();
+                fo.Write(&len, sizeof(len));
+                fo.Write(&name_obj_[0], len*sizeof(char));
             }
             /*!
              * \brief save model into file
@@ -180,7 +192,7 @@ namespace xgboost{
                 this->PredictRaw(preds_, train);
                 obj_->GetGradient(preds_, train.info, base_gbm.NumBoosters(), grad_, hess_);
                 if( grad_.size() == train.Size() ){
-                    base_gbm.DoBoost(grad_, hess_, train.data, train.info.root_index);
+                    base_gbm.DoBoost(grad_, hess_, train.data, train.info.root_index, 0, this->FindBufferOffset(train));
                 }else{
                     int ngroup = base_gbm.NumBoosterGroup();
                     utils::Assert( grad_.size() == train.Size() * (size_t)ngroup, "BUG: UpdateOneIter: mclass" );
@@ -188,7 +200,7 @@ namespace xgboost{
                     for( int g = 0; g < ngroup; ++ g ){
                         memcpy( &tgrad[0], &grad_[g*tgrad.size()], sizeof(float)*tgrad.size() );
                         memcpy( &thess[0], &hess_[g*tgrad.size()], sizeof(float)*tgrad.size() );
-                        base_gbm.DoBoost(tgrad, thess, train.data, train.info.root_index, g );
+                        base_gbm.DoBoost(tgrad, thess, train.data, train.info.root_index, g, this->FindBufferOffset(train));
                     }
                 }
             }
@@ -197,20 +209,37 @@ namespace xgboost{
              * \param iter iteration number
              * \param evals datas i want to evaluate
              * \param evname name of each dataset
-             * \param fo file to output log
+             * \return a string corresponding to the evaluation result
              */
-            inline void EvalOneIter(int iter,
-                                    const std::vector<const DMatrix*> &evals,
-                                    const std::vector<std::string> &evname,
-                                    FILE *fo=stderr ){
-                fprintf(fo, "[%d]", iter);
+            inline std::string EvalOneIter(int iter,
+                                           const std::vector<const DMatrix*> &evals,
+                                           const std::vector<std::string> &evname ){
+                std::string res;
+                char tmp[256];
+                sprintf(tmp, "[%d]", iter);
+                res = tmp;
                 for (size_t i = 0; i < evals.size(); ++i){
                     this->PredictRaw(preds_, *evals[i]);
                     obj_->EvalTransform(preds_);
-                    evaluator_.Eval(fo, evname[i].c_str(), preds_, evals[i]->info);
+                    res += evaluator_.Eval(fo, evname[i].c_str(), preds_, evals[i]->info);
                 }
-                fprintf(fo, "\n");
-                fflush(fo);
+                return res;
+            }
+            /*!
+             * \brief simple evaluation function, with a specified metric
+             * \param data input data
+             * \param metric name of metric
+             * \return a pair of <evaluation name, result>, if metric is not supported return a empty string in name
+             */
+            std::pair<std::string, float> Evaluate( const DMatrix &data, std::string metric ){
+                if( metric == "auto" ) metric = obj_->DefaultEvalMetric();
+                IEvaluator *ev = EvalSet::Create( metric.c_str() );
+                if( ev == NULL )  return std::make_pair(std::string(""),0.0f);
+                std::vector<float> preds;
+                this->Predict( preds, data );
+                float res = ev->Eval( preds, data.info );
+                delete ev;
+                return std::make_pair( metric, res );
             }
             /*! 
              * \brief get prediction
@@ -239,7 +268,7 @@ namespace xgboost{
 
                 obj_->GetGradient(preds_, train.info, base_gbm.NumBoosters(), grad_, hess_);
                 std::vector<unsigned> root_index;
-                base_gbm.DoBoost(grad_, hess_, train.data, root_index);
+                base_gbm.DoBoost(grad_, hess_, train.data, root_index, 0, this->FindBufferOffset(train));
 
                 for(size_t i = 0; i < cache_.size(); ++i){
                     this->InteractRePredict(*cache_[i].mat_);
@@ -373,7 +402,7 @@ namespace xgboost{
         protected:
             int silent;
             EvalSet evaluator_;
-            booster::GBMBase base_gbm;
+            booster::GBMPP base_gbm;
             ModelParam   mparam;           
             // objective fnction
             IObjFunction *obj_;

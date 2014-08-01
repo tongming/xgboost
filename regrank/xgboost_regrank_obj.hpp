@@ -5,9 +5,9 @@
  * \brief implementation of objective functions
  * \author Tianqi Chen, Kailong Chen
  */
-//#include "xgboost_regrank_sample.h"
 #include <vector>
-#include <functional>
+#include <cmath>
+#include <limits>
 #include "xgboost_regrank_utils.h"
 
 namespace xgboost{
@@ -53,7 +53,7 @@ namespace xgboost{
                     preds[j] = loss.PredTransform( preds[j] );
                 }
             }
-        private:
+        protected:
             float scale_pos_weight;
             LossType loss;
         };
@@ -64,9 +64,17 @@ namespace xgboost{
         class SoftmaxRankObj : public IObjFunction{
         public:
             SoftmaxRankObj(void){
+                scale_pos_weight = 1.0f;
+                walpha = 1.0f;
+                num_group = 2;
+                num_repeat = 1;
             }
             virtual ~SoftmaxRankObj(){}
             virtual void SetParam(const char *name, const char *val){
+                if( !strcmp( "scale_pos_weight", name ) ) scale_pos_weight = (float)atof( val );
+                if( !strcmp( "walpha", name ) )  walpha = (float)atof( val );
+                if( !strcmp( "softrank:repeat", name) ) num_repeat = (unsigned)atoi( val );
+                if( !strcmp( "softrank:group", name) )  num_group = (unsigned)atoi( val );
             }
             virtual void GetGradient(const std::vector<float>& preds,  
                                      const DMatrix::Info &info,
@@ -75,40 +83,139 @@ namespace xgboost{
                                      std::vector<float> &hess ) {
                 utils::Assert( preds.size() == info.labels.size(), "label size predict size not match" );
                 grad.resize(preds.size()); hess.resize(preds.size());
-                const std::vector<unsigned> &gptr = info.group_ptr;
-                utils::Assert( gptr.size() != 0 && gptr.back() == preds.size(), "rank loss must have group file" );
+                std::vector<unsigned> tgptr(2, 0); tgptr[1] = preds.size();
+                const std::vector<unsigned> &gptr = info.group_ptr.size() == 0 ? tgptr : info.group_ptr;
+                utils::Assert( gptr.size() != 0 && gptr.back() == preds.size(), "SoftmaxRank: invalid group file" );
                 const unsigned ngroup = static_cast<unsigned>( gptr.size() - 1 );
 
-                #pragma omp parallel
-                {
-                    std::vector< float > rec;                    
-                    #pragma omp for schedule(static)
-                    for (unsigned k = 0; k < ngroup; ++k){
-                        rec.clear();
-                        int nhit = 0;
-                        for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
-                            rec.push_back( preds[j] );
-                            grad[j] = hess[j] = 0.0f;
-                            nhit += info.labels[j];
-                        }
-                        Softmax( rec );
-                        if( nhit == 1 ){
-                            for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
-                                float p = rec[ j - gptr[k] ];
-                                grad[j] = p - info.labels[j];
-                                hess[j] = 2.0f * p * ( 1.0f - p );
-                            }  
+                for (unsigned k = 0; k < ngroup; ++k){
+                    std::vector<unsigned> pos_index, neg_index;
+                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
+                        if( info.labels[j] == 1.0f ) {
+                            pos_index.push_back( j );
                         }else{
-                            utils::Assert( nhit == 0, "softmax does not allow multiple labels" );
+                            
+                            neg_index.push_back( j );
                         }
+                        grad[j] = hess[j] = 0.0f;
+                    }
+
+                    for(unsigned iter = 0; iter < num_repeat; ++ iter){
+                        random::Shuffle( pos_index );
+                        random::Shuffle( neg_index );
+                        const unsigned nneg = neg_index.size();
+                        #pragma omp parallel 
+                        {
+                            std::vector<float> rec( num_group + 1 );
+                            #pragma omp for schedule(static)
+                            for( unsigned i = 0; i  < nneg - num_group + 1; i += num_group ){
+                                for( unsigned j = 0; j < num_group; ++ j ){
+                                    rec[j] = preds[ neg_index[ i + j ] ];
+                                }
+                                const unsigned pindex = pos_index[ (i/num_group)  % pos_index.size() ];
+                                rec.back() = preds[ pindex ];
+                                const float pw = info.GetWeight( pindex );
+                                Softmax( rec );
+                                for( unsigned j = 0; j < num_group; ++ j ){
+                                    const float p = rec[j];
+                                    const unsigned nindex = neg_index[ i + j ];
+                                    grad[nindex] += p * pw; 
+                                    hess[nindex] += p * (1.0f-p) * pw; 
+                                }
+                                {// positive statis
+                                    const float p = rec.back();
+                                    grad[pindex] += (p-1.0f) * pw;
+                                    hess[pindex] += p * (1.0f-p) *pw;
+                                }
+                            }
+                        }
+                    }
+                    const float scale = scale_pos_weight *  static_cast<float>( pos_index.size() * num_group ) / neg_index.size();
+                    #pragma omp parallel for schedule(static)                    
+                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
+                        grad[j] *= scale; hess[j] *= scale;
                     }
                 }
             }
             virtual const char* DefaultEvalMetric(void) {
-                return "pre@1";
+                return "auc";
+            }
+        protected:
+            float walpha;
+            float scale_pos_weight;
+            unsigned num_group, num_repeat;
+        };
+        
+        class SoftmaxWeightRankObj: public SoftmaxRankObj{
+        public:
+            virtual void GetGradient(const std::vector<float>& preds,  
+                                     const DMatrix::Info &info,
+                                     int iter,
+                                     std::vector<float> &grad, 
+                                     std::vector<float> &hess ) {
+                utils::Assert( preds.size() == info.labels.size(), "label size predict size not match" );
+                grad.resize(preds.size()); hess.resize(preds.size());
+                std::vector<unsigned> tgptr(2, 0); tgptr[1] = preds.size();
+                const std::vector<unsigned> &gptr = info.group_ptr.size() == 0 ? tgptr : info.group_ptr;
+                utils::Assert( gptr.size() != 0 && gptr.back() == preds.size(), "SoftmaxRank: invalid group file" );
+                const unsigned ngroup = static_cast<unsigned>( gptr.size() - 1 );
+
+                for (unsigned k = 0; k < ngroup; ++k){
+                    std::vector<unsigned> pos_index, neg_index;
+                    double neg_wsum = 0.0;
+                    std::vector<float> neg_wvec;
+                    for(unsigned j = gptr[k]; j < gptr[k+1]; ++j ){
+                        if( info.labels[j] == 1.0f ) {
+                            pos_index.push_back( j );
+                        }else{                            
+                            neg_index.push_back( j );
+                            neg_wsum += info.GetWeight( j );
+                            neg_wvec.push_back( neg_wsum );
+                        }
+                        grad[j] = hess[j] = 0.0f;
+                    }
+                    
+                    #pragma omp parallel 
+                    {
+                        std::vector<float> rec( this->num_group + 1 );
+                        std::vector<unsigned> neg_sample( num_group ); 
+                        random::Random rnd; rnd.Seed( iter * 1111 + omp_get_thread_num() );
+                        const unsigned nrep = this->num_repeat * neg_index.size();
+                        const float scale = this->scale_pos_weight * pos_index.size() / this->num_repeat;
+
+                        random::Shuffle( pos_index );
+                        #pragma omp for schedule(static)                      
+                        for( unsigned i = 0; i  < nrep; ++ i ){
+                            const unsigned pindex = pos_index[ i % pos_index.size() ];                                                               
+                            for( unsigned j = 0; j < this->num_group; ++ j ){
+                                // sample negative sample
+                                float r = rnd.RandDouble() * neg_wsum;
+                                size_t idx = std::lower_bound( neg_wvec.begin(), neg_wvec.end(), r ) - neg_wvec.begin();
+                                if( idx == neg_wvec.size() ) idx = neg_wvec.size() - 1;
+                                neg_sample[j] = neg_index[idx];
+                                // finish generate neg sample
+                                rec[j] = preds[ neg_sample[j] ];
+                            }                                
+                            rec.back() = preds[ pindex ];
+                            const float pw = info.GetWeight( pindex ) * scale;                                
+                            Softmax( rec );
+                            for( unsigned j = 0; j < this->num_group; ++ j ){
+                                const float p = rec[j];
+                                const unsigned nindex = neg_sample[j];
+                                grad[nindex] += p * pw; 
+                                hess[nindex] += p * (1.0f-p) * pw; 
+                            }
+                            {// positive statis
+                                const float p = rec.back();
+                                grad[pindex] += (p-1.0f) * pw;
+                                hess[pindex] += p * (1.0f-p) *pw;
+                            }
+                        }
+                    }
+                }
             }
         };
-
+        
         // simple softmax multi-class classification
         class SoftmaxMultiClassObj : public IObjFunction{
         public:
@@ -348,6 +455,144 @@ namespace xgboost{
             virtual ~PairwiseRankObj(void){}
             virtual void GetLambdaWeight( const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs ){}            
         };
+
+        class LambdaRankObj_NDCG : public LambdaRankObj{            
+        public:
+            virtual ~LambdaRankObj_NDCG(void){}
+            virtual void GetLambdaWeight(const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs){
+                float IDCG;
+                {
+                    std::vector<float> labels(sorted_list.size());
+                    for (size_t i = 0; i < sorted_list.size(); i++){
+                        labels[i] = sorted_list[i].label;
+                    }
+                    std::sort(labels.begin(), labels.end(), std::greater<float>());
+                    IDCG = CalcDCG(labels);
+                }
+
+                if( IDCG == 0.0 ){
+                    for (size_t i = 0; i < pairs.size(); ++i){
+                        pairs[i].weight = 0.0f;
+                    }
+                }else{
+                    IDCG = 1.0f / IDCG;
+                    for (size_t i = 0; i < pairs.size(); ++i){                    
+                        unsigned pos_idx = pairs[i].pos_index;
+                        unsigned neg_idx = pairs[i].neg_index;
+                        float pos_loginv = 1.0f / logf(pos_idx+2.0f);
+                        float neg_loginv = 1.0f / logf(neg_idx+2.0f);
+                        int pos_label = static_cast<int>(sorted_list[pos_idx].label);
+                        int neg_label = static_cast<int>(sorted_list[neg_idx].label);
+                        float original = ((1<<pos_label)-1) * pos_loginv + ((1<<neg_label)-1) * neg_loginv;
+                        float changed  = ((1<<neg_label)-1) * pos_loginv + ((1<<pos_label)-1) * neg_loginv;
+                        float delta = (original-changed) * IDCG;
+                        if( delta < 0.0f ) delta = - delta;
+                        pairs[i].weight = delta;
+                    }
+                }
+            }
+        private:
+            inline static float CalcDCG( const std::vector<float> &labels ){
+                double sumdcg = 0.0;
+                for( size_t i = 0; i < labels.size(); i ++ ){
+                    const unsigned rel = labels[i];
+                    if( rel != 0 ){ 
+                        sumdcg += ((1<<rel)-1) / logf( i + 2 );
+                    }
+                }
+                return static_cast<float>(sumdcg);
+            }
+        };
+
+        class LambdaRankObj_MAP : public LambdaRankObj{
+
+            struct MAPStats{
+            
+                /* \brief the accumulated precision */
+                float ap_acc;
+                /* \brief the accumulated precision assuming a positive instance is missing*/
+                float ap_acc_miss;
+                /* \brief the accumulated precision assuming that one more positive instance is inserted ahead*/
+                float ap_acc_add;
+                /* \brief the accumulated positive instance count */
+                float hits;
+                
+                MAPStats(){}
+                
+                MAPStats(float ap_acc, float ap_acc_miss, float ap_acc_add, float hits
+                    ) :ap_acc(ap_acc), ap_acc_miss(ap_acc_miss), ap_acc_add(ap_acc_add), hits(hits){
+
+                }
+
+            };
+
+        public:
+            virtual ~LambdaRankObj_MAP(void){}
+
+            /*
+            * \brief Obtain the delta MAP if trying to switch the positions of instances in index1 or index2
+            *        in sorted triples
+            * \param sorted_list the list containing entry information
+            * \param index1,index2 the instances switched
+            * \param map_stats a vector containing the accumulated precisions for each position in a list
+            */
+            inline float GetLambdaMAP(const std::vector<ListEntry> &sorted_list,
+                int index1, int index2,
+                std::vector< MAPStats > &map_stats){
+                if (index1 == index2 || map_stats[map_stats.size() - 1].hits == 0) {
+                    return 0.0;
+                }
+                if (index1 > index2) std::swap(index1, index2);
+                float original = map_stats[index2].ap_acc;
+                if (index1 != 0) original -= map_stats[index1 - 1].ap_acc;
+                float changed = 0, label1 = sorted_list[index1].label > 0?1:0,label2 = sorted_list[index2].label > 0?1:0;
+                if(label1 == label2){
+                    return 0.0;
+                }else if (label1 < label2){
+                    changed += map_stats[index2 - 1].ap_acc_add - map_stats[index1].ap_acc_add;
+                    changed += (map_stats[index1].hits + 1.0f) / (index1 + 1);
+                }
+                else{
+                    changed += map_stats[index2 - 1].ap_acc_miss - map_stats[index1].ap_acc_miss;
+                    changed += map_stats[index2].hits / (index2 + 1);
+                }
+
+                float ans = (changed - original) / (map_stats[map_stats.size() - 1].hits);
+                if (ans < 0) ans = -ans;
+                return ans;
+            }
+
+            /*
+            * \brief obtain preprocessing results for calculating delta MAP
+            * \param sorted_list the list containing entry information
+            * \param map_stats a vector containing the accumulated precisions for each position in a list
+            */
+            inline void GetMAPStats(const std::vector<ListEntry> &sorted_list,
+                std::vector< MAPStats > &map_acc){
+                map_acc.resize(sorted_list.size());
+                float hit = 0, acc1 = 0, acc2 = 0, acc3 = 0;
+                for (size_t i = 1; i <= sorted_list.size(); i++){
+                    if ((int)sorted_list[i - 1].label > 0) {
+                        hit++;
+                        acc1 += hit / i;
+                        acc2 += (hit - 1) / i;
+                        acc3 += (hit + 1) / i;
+                    }
+
+                    map_acc[i - 1] = MAPStats(acc1,acc2,acc3,hit);
+                }
+            }
+
+            virtual void GetLambdaWeight(const std::vector<ListEntry> &sorted_list, std::vector<LambdaPair> &pairs){
+                std::vector< MAPStats > map_stats;
+                GetMAPStats(sorted_list, map_stats);
+                for (size_t i = 0; i < pairs.size(); i++){
+                    pairs[i].weight = GetLambdaMAP(sorted_list, pairs[i].pos_index, pairs[i].neg_index, map_stats);
+                }
+            }
+           
+        };
+
     };
 };
 #endif
