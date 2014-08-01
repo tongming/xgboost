@@ -112,6 +112,11 @@ namespace xgboost{
                     maker.Make( tree.param.max_depth, num_pruned );
                     break;
                 }                    
+                case 4:{
+                    ColTreeMakerX<FMatrix,VarStats> maker( tree, param, grad, hess, smat, root_index, constrain );
+                    maker.Make( tree.param.max_depth, num_pruned );
+                    break;
+                }                    
                 default: utils::Error("unknown tree maker");
                 }
                 if( !silent ){

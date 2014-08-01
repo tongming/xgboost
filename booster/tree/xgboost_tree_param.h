@@ -38,7 +38,36 @@ namespace xgboost{
             inline bool Empty(void) const{
                 return sum_hess == 0.0;
             }
-        };        
+        };
+        /*! \brief statistics with variance */
+        struct VarStats: public CoreStats{
+            /*! \brief sum gradient statistics */
+            double sum_square;
+            /*! \brief clear the statistics */
+            inline void Clear(void){
+                CoreStats::Clear();
+                sum_square = 0.0f;
+            }            
+            /*! \brief add statistics to the data */
+            inline void Add( double grad, double hess ){
+                CoreStats::Add(grad, hess);
+                sum_square += grad*grad / hess;
+            }
+            /*! \brief add statistics to the data */
+            inline void Add( const VarStats &b ){
+                sum_grad += b.sum_grad; 
+                sum_hess += b.sum_hess;
+                sum_square += b.sum_square;
+            }
+            /*! \brief substract the statistics by b */
+            inline VarStats Substract(const VarStats &b) const{
+                VarStats res; 
+                res.sum_grad = this->sum_grad - b.sum_grad;
+                res.sum_hess = this->sum_hess - b.sum_hess;
+                res.sum_square = this->sum_square - b.sum_square;
+                return res;
+            }
+        };
     };
 
     namespace booster{
@@ -69,7 +98,8 @@ namespace xgboost{
             float colsample_bytree;
             // speed optimization for dense column 
             float opt_dense_col;
-
+            // variance cost in weight
+            float var_gamma;
             // number of threads to be used for tree construction, if OpenMP is enabled, if equals 0, use system default
             int nthread;
             /*! \brief constructor */
@@ -86,6 +116,7 @@ namespace xgboost{
                 use_layerwise = 0;
                 opt_dense_col = 1.0f;
                 nthread = 0;
+                var_gamma = 2.0f;
             }
             /*! 
              * \brief set parameters from outside 
@@ -110,6 +141,7 @@ namespace xgboost{
                 if( !strcmp( name, "use_layerwise") )     use_layerwise = atoi( val );
                 if( !strcmp( name, "opt_dense_col") )     opt_dense_col = (float)atof( val );
                 if( !strcmp( name, "nthread") )           nthread = atoi( val );
+                if( !strcmp( name, "var_gamma") )         var_gamma = (float)atof( val );
                 if( !strcmp( name, "default_direction") ) {
                     if( !strcmp( val, "learn") )  default_direction = 0;
                     if( !strcmp( val, "left") )   default_direction = 1;
@@ -198,6 +230,13 @@ namespace xgboost{
             }
             inline double CalcRootGain( const CoreStats &d ) const{
                 return this->CalcRootGain( d.sum_grad, d.sum_hess );
+            }
+            inline double CalcGain( const VarStats &d, double base_weight ) const{
+                double var = (d.sum_square / d.sum_hess) - Sqr(d.sum_grad / d.sum_hess);
+                return this->CalcRootGain( d.sum_grad, d.sum_hess ) - var * var_gamma;
+            }
+            inline double CalcRootGain( const VarStats &d ) const{
+                return this->CalcGain(d, 0.0f);
             }
         };
     };
