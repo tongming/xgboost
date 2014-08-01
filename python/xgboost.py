@@ -209,6 +209,24 @@ class Booster:
             res.append( str(sarr[i]) )
         return res
 
+    def get_fscore(self,fmap=''):
+        """get a feature importance of each feature """
+        trees = self.get_dump(fmap)
+        fmap = {}
+        for tree in trees:
+            print tree
+            for l in tree.split('\n'):
+                arr = l.split('[')
+                if len(arr) == 1:
+                    continue
+                fid = arr[1].split(']')[0]
+                fid = fid.split('<')[0]
+                if fid not in fmap:
+                    fmap[fid] = 1
+                else:
+                    fmap[fid]+= 1
+        return fmap
+                   
 def train(params, dtrain, num_boost_round = 10, evals = [], obj=None):
     """ train a booster with given paramaters """
     bst = Booster(params, [dtrain]+[ d[0] for d in evals ] )
