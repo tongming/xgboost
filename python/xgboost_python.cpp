@@ -126,7 +126,11 @@ namespace xgboost{
     
         class Booster: public xgboost::regrank::RegRankBoostLearner{
         private:
-            bool init_trainer, init_model;
+            bool init_trainer, init_model;      
+        private:
+            // temporal space to save model dump
+            std::vector<std::string> model_dump;
+            std::vector<const char*> model_dump_cptr;
         public:
             Booster(const std::vector<regrank::DMatrix *> mats){
                 silent = 1;
@@ -176,7 +180,16 @@ namespace xgboost{
                         memcpy( &thess[0], &hess_[g*tgrad.size()], sizeof(float)*tgrad.size() );
                         base_gbm.DoBoost(tgrad, thess, train.data, train.info.root_index, g );
                     }
-                }                
+                }
+            }
+            inline const char** GetModelDump(const utils::FeatMap& fmap, bool with_stats, size_t *len){
+                model_dump = this->DumpModel(fmap, with_stats);
+                model_dump_cptr.resize( model_dump.size() ); 
+                for( size_t i = 0; i < model_dump.size(); ++i ){
+                    model_dump_cptr[i] = model_dump[i].c_str();
+                }
+                *len = model_dump.size();
+                return &model_dump_cptr[0];
             }
         };
     };
@@ -299,19 +312,13 @@ extern "C"{
     void XGBoosterSaveModel( const void *handle, const char *fname ){
         static_cast<const Booster*>(handle)->SaveModel( fname );
     }
-    void XGBoosterDumpModel( void *handle, const char *fname, const char *fmap ){
+    const char** XGBoosterDumpModel( void *handle, const char *fmap, size_t *len ){
         using namespace xgboost::utils;
-        FILE *fo = FopenCheck( fname, "w" );
         FeatMap featmap; 
         if( strlen(fmap) != 0 ){ 
             featmap.LoadText( fmap );
         }
-        std::vector<std::string> dump = static_cast<Booster*>(handle)->DumpModel( featmap, false );
-        for( size_t i = 0; i < dump.size(); ++ i ){
-            fprintf(fo,"booster[%lu]:\n", i);
-            fprintf(fo,"%s", dump[i].c_str() ); 
-        }
-        fclose( fo );
+        return static_cast<Booster*>(handle)->GetModelDump( featmap, false, len );
     }
 
     void XGBoosterUpdateInteract( void *handle, void *dtrain, const char *action ){

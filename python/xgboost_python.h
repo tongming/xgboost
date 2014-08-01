@@ -203,12 +203,13 @@ extern "C"{
      */    
     void XGBoosterSaveModel( const void *handle, const char *fname );
     /*! 
-     * \brief dump model into text file
+     * \brief dump model, return array of strings representing model dump
      * \param handle handle
-     * \param fname file name
      * \param fmap  name to fmap can be empty string
+     * \param len length of output array 
+     * \return char *data[], representing dump of each model
      */    
-    void XGBoosterDumpModel( void *handle, const char *fname, const char *fmap );
+    const char** XGBoosterDumpModel( void *handle, const char *fmap, size_t *len );
     /*! 
      * \brief interactively update model: beta
      * \param handle handle

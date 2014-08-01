@@ -24,6 +24,7 @@ xglib.XGDMatrixGetWeight.restype =  ctypes.POINTER( ctypes.c_float )
 xglib.XGDMatrixGetRow.restype = ctypes.POINTER( REntry )
 xglib.XGBoosterCreate.restype = ctypes.c_void_p
 xglib.XGBoosterPredict.restype = ctypes.POINTER( ctypes.c_float ) 
+xglib.XGBoosterDumpModel.restype =  ctypes.POINTER( ctypes.c_char_p )
 
 def ctypes2numpy( cptr, length ):
     # convert a ctypes pointer array to numpy
@@ -185,11 +186,28 @@ class Booster:
     def load_model(self, fname):
         """load model from file"""
         xglib.XGBoosterLoadModel( self.handle, ctypes.c_char_p(fname.encode('utf-8')) )
-    def dump_model(self, fname, fmap=''):
+    def dump_model(self, fo, fmap=''):
         """dump model into text file"""
-        xglib.XGBoosterDumpModel(
-            self.handle, ctypes.c_char_p(fname.encode('utf-8')), 
-            ctypes.c_char_p(fmap.encode('utf-8')))
+        if isinstance(fo,str):            
+            fo = open(fo,'w')
+            need_close = True
+        else:
+            need_close = False
+        ret = self.get_dump(fmap)
+        for i in range(len(ret)):
+            fo.write('booster[%d]:\n' %i)
+            fo.write( ret[i] )
+        if need_close:
+            fo.close()
+
+    def get_dump(self, fmap=''):
+        """get dump of model as list of strings """
+        length = ctypes.c_ulong()
+        sarr = xglib.XGBoosterDumpModel(self.handle, ctypes.c_char_p(fmap.encode('utf-8')), ctypes.byref(length))
+        res = []
+        for i in range(length.value):
+            res.append( str(sarr[i]) )
+        return res
 
 def train(params, dtrain, num_boost_round = 10, evals = [], obj=None):
     """ train a booster with given paramaters """
