@@ -63,6 +63,18 @@ extern "C"{
                             size_t nrow,
                             size_t ncol,
                             float  missing );
+
+    /*! 
+     * \brief set matrix content from data content of an existing DMatrix
+     * \param handle a instance of data matrix to be created
+     * \param hsrc source handle of data matrix 
+     * \param idxset index set 
+     * \param len length of index set
+     */
+    void XGDMatrixSliceDMatrix( void *handle, 
+                                void *hsrc,
+                                const int *idxset,
+                                size_t len );
     /*! 
      * \brief set label of the training matrix
      * \param handle a instance of data matrix

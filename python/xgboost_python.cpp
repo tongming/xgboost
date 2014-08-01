@@ -76,6 +76,22 @@ namespace xgboost{
                 this->data.InitData();
                 this->init_col_ = true;
             }
+            inline void SliceDMatrix( const DMatrix &src, const int *idxset, size_t len ){
+                utils::Assert( src.info.group_ptr.size() == 0, "slice does not support group structure" );
+                xgboost::booster::FMatrixS &mat = this->data;
+                mat.Clear();
+                for( size_t i = 0; i < len; ++ i){
+                    const int ridx = idxset[i];
+                    xgboost::booster::FMatrixS::Line line = src.data[ridx];
+                    mat.row_data_.resize( mat.row_data_.size() + line.len );
+                    memcpy( &mat.row_data_[ mat.row_ptr_.back() ], line.data_, sizeof(XGEntry)*line.len );
+                    mat.row_ptr_.push_back( mat.row_ptr_.back() + line.len );
+                    if( src.info.labels.size() != 0 ) info.labels.push_back( src.info.labels[ridx] );
+                    if( src.info.weights.size() != 0 ) info.weights.push_back( src.info.weights[ridx] );                    
+                }
+                this->data.InitData();
+                this->init_col_ = true;
+            }
             inline void SetLabel( const float *label, size_t len ){
                 this->info.labels.resize( len );
                 memcpy( &(this->info).labels[0], label, sizeof(float)*len );
@@ -195,7 +211,14 @@ extern "C"{
                             size_t nrow,
                             size_t ncol,
                             float  missing ){
-      static_cast<DMatrix*>(handle)->ParseMat(data, nrow, ncol, missing);
+        static_cast<DMatrix*>(handle)->ParseMat(data, nrow, ncol, missing);
+    }
+
+    void XGDMatrixSliceDMatrix( void *handle, 
+                                void *hsrc,
+                                const int *idxset,
+                                size_t len ){
+        static_cast<DMatrix*>(handle)->SliceDMatrix(*static_cast<DMatrix*>(hsrc), idxset, len);
     }
     void XGDMatrixSetLabel( void *handle, const float *label, size_t len ){
         static_cast<DMatrix*>(handle)->SetLabel(label,len);        

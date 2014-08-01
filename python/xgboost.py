@@ -112,6 +112,12 @@ class DMatrix:
         length = ctypes.c_ulong()
         row = xglib.XGDMatrixGetRow(self.handle, ridx, ctypes.byref(length) );
         return [ (int(row[i].findex),row[i].fvalue) for i in range(length.value) ]
+    # slice the DMatrix to return a new DMatrix that only contains rindex
+    def slice(self, rindex):
+        res = DMatrix()
+        xglib.XGDMatrixSliceDMatrix( res.handle, self.handle, 
+                                     (ctypes.c_int*len(rindex))(*rindex), len(rindex) )
+        return res
 
 class Booster:
     """learner class """
