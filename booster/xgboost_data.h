@@ -122,7 +122,7 @@ namespace xgboost{
              *   this function is used to help speedup, 
              *   doese not necessarily implement it if not sure, return 0.0;
              */
-            inline bool GetColDensity(size_t cidx) const;
+            inline float GetColDensity(size_t cidx) const;
         };
     };
 };

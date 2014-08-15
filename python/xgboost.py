@@ -147,10 +147,10 @@ class Booster:
                 xglib.XGBoosterSetParam(
                     self.handle, ctypes.c_char_p(k.encode('utf-8')),
                     ctypes.c_char_p(str(v).encode('utf-8')) )             
-    def update(self, dtrain):
+    def update(self, dtrain, it = 0):
         """ update """
         assert isinstance(dtrain, DMatrix)
-        xglib.XGBoosterUpdateOneIter( self.handle, dtrain.handle )
+        xglib.XGBoosterUpdateOneIter( self.handle, it, dtrain.handle )
     def boost(self, dtrain, grad, hess, bst_group = -1):
         """ update """
         assert len(grad) == len(hess)
@@ -232,7 +232,7 @@ def train(params, dtrain, num_boost_round = 10, evals = [], obj=None):
     bst = Booster(params, [dtrain]+[ d[0] for d in evals ] )
     if obj == None:
         for i in range(num_boost_round):
-            bst.update( dtrain )
+            bst.update( dtrain, i )
             if len(evals) != 0:
                 bst.eval_set( evals, i )
     else:

@@ -151,6 +151,10 @@ namespace xgboost{
                 }
                 return psum;
             }
+            inline void ClearBuffer(int buffer_index, int bst_group = 0){
+                const int bid = mparam.BufferOffset(buffer_index, bst_group);
+                this->pred_buffer[bid]  = 0.0f;
+            }
         protected:
             // extended model
             struct ExtModel{                

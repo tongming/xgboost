@@ -188,7 +188,7 @@ namespace xgboost{
             /*!
              * \brief update the model for one iteration
              */
-            inline void UpdateOneIter(const DMatrix &train){
+            inline void UpdateOneIter(int iter, const DMatrix &train){
                 this->PredictRaw(preds_, train);
                 obj_->GetGradient(preds_, train.info, base_gbm.NumBoosters(), grad_, hess_);
                 if( grad_.size() == train.Size() ){
@@ -203,6 +203,8 @@ namespace xgboost{
                         base_gbm.DoBoost(tgrad, thess, train.data, train.info.root_index, g, this->FindBufferOffset(train));
                     }
                 }
+                // optional clear buffer
+                if(mparam.clear_period != 0 && (iter+1) % mparam.clear_period == 0) this->ClearBuffer(train);
             }
             /*!
              * \brief evaluate the model for specific iteration
@@ -311,6 +313,15 @@ namespace xgboost{
                     this->PredictBuffer(&preds[0], data, buffer_offset, bst_group );
                 }
             }
+            inline void ClearBuffer(const DMatrix &data){
+                const unsigned ndata = static_cast<unsigned>(data.Size());
+                int buffer_offset =  this->FindBufferOffset(data);
+                utils::Assert( buffer_offset>=0, "need buffer offset bigger than 0");
+                #pragma omp parallel for schedule( static )
+                for (unsigned j = 0; j < ndata; ++j){
+                    base_gbm.ClearBuffer(buffer_offset+j);
+                }
+            }
             /*! \brief get the un-transformed predictions, given data */
             inline void PredictBuffer(float *preds, const DMatrix &data, int buffer_offset, int bst_group ){
                 const unsigned ndata = static_cast<unsigned>(data.Size());
@@ -338,14 +349,17 @@ namespace xgboost{
                 int num_feature;  
                 /* \brief number of class, if it is multi-class classification  */
                 int num_class; 
+                /*! \brief clear period of buffer */
+                int clear_period;
                 /*! \brief reserved field */
-                int reserved[15];
+                int reserved[14];
                 /*! \brief constructor */
                 ModelParam(void){
                     base_score = 0.5f;
                     loss_type = -1;
                     num_feature = 0;
                     num_class = 0;
+                    clear_period = 0;
                     memset(reserved, 0, sizeof(reserved));
                 }
                 /*!
@@ -357,6 +371,7 @@ namespace xgboost{
                     if (!strcmp("base_score", name))  base_score = (float)atof(val);
                     if (!strcmp("num_class", name))   num_class = atoi(val);
                     if (!strcmp("loss_type", name))   loss_type = atoi(val);
+                    if (!strcmp("clear_period", name))   clear_period = atoi(val);
                     if (!strcmp("bst:num_feature", name)) num_feature = atoi(val);
                 }
                 /*!
