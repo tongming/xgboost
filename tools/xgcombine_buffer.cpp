@@ -81,6 +81,7 @@ public:
     // whether to do node and edge feature renormalization
     int rescale;
     int linelimit;
+    int init_data;
 public:
     FILE *fp, *fwlist, *fgroup, *fweight;
     std::vector<Header> fheader;
@@ -88,6 +89,7 @@ public:
     DataLoader( void ){
         rescale = 0; 
         linelimit = -1;
+        init_data = 0;
         fp = NULL; fwlist = NULL; fgroup = NULL; fweight = NULL;
     }
 private:
@@ -176,7 +178,9 @@ public:
             info.group_ptr.push_back( info.group_ptr.back() + ngacc );
             utils::Assert( info.group_ptr.back() == data.NumRow(), "group size must match num rows" );
         }
-        this->data.InitData();
+        if( init_data != 0 ){
+            this->data.InitData();
+        }
     }
 };
 
@@ -205,6 +209,9 @@ int main( int argc, char *argv[] ){
         }
         if( !strcmp( argv[i], "-wlist") ){
             loader.fwlist = utils::FopenCheck( argv[ ++i ], "r" ); continue;
+        }
+        if( !strcmp( argv[i], "-initcol") ){
+            loader.init_data = atoi( argv[++i] ); continue;
         }
         if( !strcmp( argv[i], "-fgroup") ){
             loader.fgroup = utils::FopenCheck( argv[ ++i ], "r" ); continue;
