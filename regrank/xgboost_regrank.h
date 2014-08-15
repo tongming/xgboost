@@ -129,7 +129,7 @@ namespace xgboost{
             inline void LoadModel(const char *fname){
                 utils::FileStream fi(utils::FopenCheck(fname, "rb"));
                 this->LoadModel(fi);
-                fi.Close();                
+                fi.Close();          
             }
             /*!
              * \brief load model from stream
