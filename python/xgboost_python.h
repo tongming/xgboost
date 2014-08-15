@@ -157,9 +157,10 @@ extern "C"{
     /*! 
      * \brief update the model in one round using dtrain
      * \param handle handle
+     * \param iter current iteration rounds
      * \param dtrain training data
      */        
-    void XGBoosterUpdateOneIter( void *handle, void *dtrain );   
+    void XGBoosterUpdateOneIter( void *handle, int iter, void *dtrain );   
     
     /*!
      * \brief update the model, by directly specify gradient and second order gradient, 

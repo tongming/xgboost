@@ -277,11 +277,11 @@ extern "C"{
     void XGBoosterSetParam( void *handle, const char *name, const char *value ){
         static_cast<Booster*>(handle)->SetParam( name, value );
     }
-    void XGBoosterUpdateOneIter( void *handle, void *dtrain ){
+    void XGBoosterUpdateOneIter( void *handle, int iter, void *dtrain ){
         Booster *bst = static_cast<Booster*>(handle);
         DMatrix *dtr = static_cast<DMatrix*>(dtrain);
         bst->CheckInit(); dtr->CheckInit(); 
-        bst->UpdateOneIter( *dtr );
+        bst->UpdateOneIter( iter, *dtr );
     }    
     void XGBoosterBoostOneIter( void *handle, void *dtrain, 
                                 float *grad, float *hess, size_t len, int bst_group ){
