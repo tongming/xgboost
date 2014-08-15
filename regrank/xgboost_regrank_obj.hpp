@@ -8,6 +8,7 @@
 #include <vector>
 #include <cmath>
 #include <limits>
+#include <functional>
 #include "xgboost_regrank_utils.h"
 
 namespace xgboost{
